@@ -641,8 +641,8 @@ class MainWindow(ctk.CTk):
         # Botón Modo Widget Flotante (Mini-VEX Companion)
         self.btn_widget_mode = ctk.CTkButton(
             header_right,
-            text="⧉ WIDGET",
-            width=92,
+            text="⧉ Modo Widget",
+            width=112,
             height=28,
             fg_color="#0e1626",
             hover_color="#18233b",
@@ -717,7 +717,7 @@ class MainWindow(ctk.CTk):
         # Botón de micrófono (+ VOZ)
         self.btn_mic = ctk.CTkButton(
             self.frame_floating_input,
-            text="🎙 VOZ",
+            text="+ VOZ",
             width=76,
             height=38,
             fg_color="#0e1b2e",

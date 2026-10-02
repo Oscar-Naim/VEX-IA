@@ -716,6 +716,14 @@ class RobotVisorCanvas(tk.Canvas):
     def _draw_contextual_icon(self, cx: float, cy: float, vw: float, vh: float, scale: float, t: float, icon_name: str):
         """Dibuja un icono temático en el centro de la pantalla."""
         mini_eye_y = cy - 14.0 * scale
+
+        if icon_name in ["alert", "warning", "error"]:
+            # Modo Alerta: Ojos bien abiertos y signo de exclamación neón
+            self._draw_surprise_eye(cx - vw * 0.32, mini_eye_y, scale * 0.9, t)
+            self._draw_surprise_eye(cx + vw * 0.32, mini_eye_y, scale * 0.9, t)
+            self._draw_pixel_alert(cx, cy, scale, t)
+            return
+
         self._draw_happy_eye(cx - vw * 0.32, mini_eye_y, scale * 0.85, t)
         self._draw_happy_eye(cx + vw * 0.32, mini_eye_y, scale * 0.85, t)
 
@@ -879,4 +887,30 @@ class RobotVisorCanvas(tk.Canvas):
         py = by2 - 4 * scale
         self.create_line(px - 10 * scale, py - 10 * scale, px, py, fill="#fde047", width=max(2.0, 3.0 * scale), capstyle="round")
         self.create_oval(px - 2 * scale, py - 2 * scale, px + 2 * scale, py + 2 * scale, fill="#ffffff", outline="")
+
+    def _draw_pixel_alert(self, cx: float, cy: float, scale: float, t: float):
+        """Icono animado de Modo Alerta: Triángulo o señal de advertencia neón con signo de exclamación !"""
+        pulse = 0.5 + 0.5 * math.sin(t * 8.0)
+        c_glow = self.c_amber_glow if pulse > 0.5 else self.c_amber
+        c_fill = "#2a1506"
+        sz = 44.0 * scale
+
+        # Triángulo de advertencia estilizado
+        p1 = (cx, cy - sz * 0.55)
+        p2 = (cx - sz * 0.55, cy + sz * 0.45)
+        p3 = (cx + sz * 0.55, cy + sz * 0.45)
+        self.create_polygon(
+            p1[0], p1[1], p2[0], p2[1], p3[0], p3[1],
+            fill=c_fill, outline=c_glow, width=max(2.0, 2.5 * scale)
+        )
+
+        # Signo de exclamación pixelado (!)
+        line_w = max(2.5, 4.0 * scale)
+        top_y = cy - sz * 0.22
+        bot_y = cy + sz * 0.12
+        self.create_line(cx, top_y, cx, bot_y, fill=self.c_white, width=line_w, capstyle="round")
+        dot_r = max(1.5, 2.5 * scale)
+        dot_y = cy + sz * 0.28
+        self.create_oval(cx - dot_r, dot_y - dot_r, cx + dot_r, dot_y + dot_r, fill=self.c_white, outline="")
+
 

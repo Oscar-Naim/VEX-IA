@@ -43,12 +43,13 @@ COLORS = {
 
 # Failover Pool Multimodelo Oficial Gemini API
 AVAILABLE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-1.5-flash",
     "gemini-flash-lite-latest",
     "gemini-3.5-flash",
     "gemini-flash-latest",
-    "gemini-3.7-flash",
 ]
-DEFAULT_MODEL = "gemini-flash-lite-latest"
+DEFAULT_MODEL = "gemini-2.5-flash"
 FALLBACK_MODELS = AVAILABLE_MODELS
 
 # Valores por defecto para nuevos usuarios
@@ -57,7 +58,7 @@ DEFAULT_USER_CONFIG = {
     "user_name": "Oscar",
     "voice_id": "es-MX-JorgeNeural",
     "hands_free_mode": False,
-    "preferred_model": "gemini-flash-lite-latest"
+    "preferred_model": "gemini-2.5-flash"
 }
 
 

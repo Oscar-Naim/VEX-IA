@@ -59,12 +59,14 @@ def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[s
         return "happy", "notes", 3.5
 
 
-    # 2. Expresiones faciales
+    # 2. Expresiones faciales e iconos de alerta
+    if any(k in text for k in ["error", "fallo", "falla", "alerta", "advertencia", "peligro", "cuidado"]):
+        return "surprise", "alert", 3.5
     if any(k in text for k in ["cool", "gafas", "lentes", "facha", "fachero", "chido", "crack", "estilo", "thug life"]):
         return "cool_shades", None, 6.0
     if any(k in text for k in ["feliz", "alegre", "excelente", "maravilloso", "gracias", "genial", "jaja", "jeje", "risa", "chiste", "broma", "buen trabajo"]):
         return "happy", None, 3.5
-    if any(k in text for k in ["sorpresa", "increible", "increíble", "asombroso", "cuidado", "peligro", "alerta", "atencion", "ojo"]):
+    if any(k in text for k in ["sorpresa", "increible", "increíble", "asombroso"]):
         return "surprise", None, 3.5
     if any(k in text for k in ["duerme", "descansa", "reposo", "dormir", "sueño", "buenas noches", "apagate"]):
         return "sleeping", None, 5.0
@@ -76,10 +78,11 @@ def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[s
 
 class GeminiAgent:
     AVAILABLE_MODELS: List[str] = getattr(config, "AVAILABLE_MODELS", [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
         "gemini-flash-lite-latest",
         "gemini-3.5-flash",
         "gemini-flash-latest",
-        "gemini-3.7-flash",
     ])
 
     def __init__(
@@ -103,8 +106,8 @@ class GeminiAgent:
         self.last_api_call_time: float = 0.0
         self.min_request_interval: float = 2.0
 
-        # Límite de ventana deslizante: 3 turnos (6 mensajes: 3 usuario + 3 modelo)
-        self.max_history_messages: int = 6
+        # Historial deslizante estricto: Podar a un máximo de 4 mensajes del chat
+        self.max_history_messages: int = 4
 
         self.raw_tools = [
             search_youtube,
@@ -389,11 +392,11 @@ class GeminiAgent:
                         err_str = str(clean_err)
                         last_error = clean_err
 
-                # 2. Manejo de error 429 (Resource Exhausted) con backoff
+                # 2. Manejo de error 429 (Resource Exhausted) con backoff de 4 segundos
                 if "ResourceExhausted" in err_str or "429" in err_str:
                     rate_limit_occurred = True
-                    safe_print(f"[VEX Core] Límite de cuota en '{model_name}'. Aplicando backoff de 3 segundos...")
-                    time.sleep(3.0)
+                    safe_print(f"[VEX Core] Límite de cuota en '{model_name}'. Aplicando backoff táctico de 4 segundos...")
+                    time.sleep(4.0)
                     try:
                         self._enforce_rate_limit()
                         retry_resp = self.chat.send_message(message)
@@ -434,8 +437,14 @@ class GeminiAgent:
         err_msg = str(last_error) if last_error else "Error desconocido"
         safe_print(f"[VEX Core] Error en transmisión: {self._sanitize_error(err_msg)}")
 
+        if self.on_emotion:
+            try:
+                self.on_emotion("surprise", "alert", 3.5)
+            except Exception:
+                pass
+
         if rate_limit_occurred or "ResourceExhausted" in err_msg or "429" in err_msg:
-            return "Canal de inferencia temporalmente ocupado, dame un segundo."
+            return "Canal de inferencia temporalmente ocupado, dame unos segundos."
         elif "503" in err_msg or "UNAVAILABLE" in err_msg:
             return "Los servidores de Gemini presentan alta demanda. Reintentando enlace en unos instantes."
         elif "Failed to connect" in err_msg or "getaddrinfo" in err_msg:

@@ -30,5 +30,11 @@ pygame>=2.5.0
 # Gestión de Entorno y Configuración Local BYOK
 python-dotenv>=1.0.0
 
+# Peticiones HTTP de red y validación
+requests>=2.31.0
+
 # Telemetría de Diagnóstico de Hardware y Control del Sistema
 psutil>=5.9.0
+
+# Empaquetador Autónomo a Binario (.exe)
+pyinstaller>=6.0.0

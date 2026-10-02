@@ -87,6 +87,18 @@ class LocalIntentRouter:
                 icon_duration=7.0
             )
 
+        # Modo Alerta / Advertencia
+        if re.search(r"\b(modo\s+alerta|alerta\s+roja|alerta\s+general|alerta|peligro|emergencia)\b", norm) and len(norm.split()) <= 4:
+            return LocalRouteResult(
+                handled=True,
+                action_name="visor:alert",
+                execution_result="Modo alerta proyectado en visor",
+                spoken_response=f"¡Atención! Modo de alerta táctico activado, {user_name}. Sensores en máxima vigilancia.",
+                expression="surprise",
+                icon="alert",
+                icon_duration=4.5
+            )
+
         # Saludo amistoso directo
         if re.search(r"^(hola|buenos\s+dias|buenas\s+tardes|buenas\s+noches|que\s+tal|saludos)\b", norm) and len(norm.split()) <= 4:
             return LocalRouteResult(
