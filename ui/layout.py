@@ -624,6 +624,8 @@ class MainWindow(ctk.CTk):
         )
         self.chat_container.pack(fill="both", expand=True, padx=20, pady=(10, 85))
         self.chat_container.bind("<Configure>", self._on_chat_resize)
+        self.chat_container.bind("<MouseWheel>", self._on_chat_mouse_wheel, add=True)
+        self.chat_container._parent_canvas.bind("<MouseWheel>", self._on_chat_mouse_wheel, add=True)
 
         # Espaciador inferior dinámico para evitar que la cápsula flotante tape los últimos mensajes
         self._chat_bottom_spacer = ctk.CTkFrame(self.chat_container, height=85, fg_color="transparent")
@@ -938,22 +940,27 @@ class MainWindow(ctk.CTk):
         self.after(120, _do_scroll)
         self.after(260, _do_scroll)
 
-    def _bind_mousewheel_recursive(self, widget):
-        """Propaga el evento de la rueda del ratón hacia el canvas de chat para desplazamiento sin interrupciones."""
-        def _on_wheel(event):
-            try:
-                if sys.platform.startswith("win"):
-                    delta = -int(event.delta / 40)
-                    self.chat_container._parent_canvas.yview_scroll(delta, "units")
-                else:
-                    self.chat_container._parent_canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
-            except Exception:
-                pass
-
+    def _on_chat_mouse_wheel(self, event):
+        """Desplazamiento ágil, veloz y fluido del lienzo de chat."""
         try:
-            widget.bind("<MouseWheel>", _on_wheel, add=True)
-            widget.bind("<Button-4>", _on_wheel, add=True)
-            widget.bind("<Button-5>", _on_wheel, add=True)
+            if sys.platform.startswith("win"):
+                # Aceleración rápida (60 unidades por click de rueda en Windows)
+                delta = -int(event.delta / 2)
+                self.chat_container._parent_canvas.yview_scroll(delta, "units")
+            elif sys.platform == "darwin":
+                self.chat_container._parent_canvas.yview_scroll(-int(event.delta * 4), "units")
+            else:
+                self.chat_container._parent_canvas.yview_scroll(-4 if event.num == 4 else 4, "units")
+            return "break"
+        except Exception:
+            pass
+
+    def _bind_mousewheel_recursive(self, widget):
+        """Propaga el evento de la rueda del ratón hacia el canvas de chat con velocidad acelerada."""
+        try:
+            widget.bind("<MouseWheel>", self._on_chat_mouse_wheel, add=True)
+            widget.bind("<Button-4>", self._on_chat_mouse_wheel, add=True)
+            widget.bind("<Button-5>", self._on_chat_mouse_wheel, add=True)
         except Exception:
             pass
 
