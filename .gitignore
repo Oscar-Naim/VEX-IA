@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary audio files and media
+*.mp3
+*.wav
+temp_vex_voice.mp3
+
+# Environment variables and API keys (CRITICAL: Do not expose)
+.env
+.env.local
+.env.*.local
+
+# User configuration with sensitive BYOK credentials
+config/user_config.json
+
+# Speech and Wake Word offline models / cache
+vosk-model*
+.cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE, Editor, and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Scratch and debug files
+scratch/

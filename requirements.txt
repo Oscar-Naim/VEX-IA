@@ -1,0 +1,34 @@
+# ==============================================================================
+# LYAXIS labs™ // VEX Cyber Assistant - Dependencias Oficiales
+# ==============================================================================
+# Instalación rápida:
+#   pip install -r requirements.txt
+#
+# Ejecución del Asistente:
+#   python main.py
+# ==============================================================================
+
+# Núcleo de Inferencia y LLM (Google Gemini SDK Oficial)
+google-genai>=0.1.1
+
+# Interfaz Gráfica Futurista HUD (CustomTkinter)
+customtkinter>=5.2.0
+
+# Motor de Palabra de Activación Offline 100% Local (Wake Word Zero-Cloud)
+vosk>=0.3.45
+
+# Reconocimiento y Filtro Estricto de Voz por Micrófono (STT)
+SpeechRecognition>=3.10.0
+pyaudio>=0.2.14
+
+# Motor de Voz Neural Ultra-Realista Masculina (Edge-TTS)
+edge-tts>=6.1.0
+
+# Reproducción y Mezclador de Audio Asíncrono de Baja Latencia
+pygame>=2.5.0
+
+# Gestión de Entorno y Configuración Local BYOK
+python-dotenv>=1.0.0
+
+# Telemetría de Diagnóstico de Hardware y Control del Sistema
+psutil>=5.9.0

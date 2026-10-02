@@ -1,0 +1,378 @@
+"""
+LYAXIS labs™ - Agente Táctico Gemini (VEX Core - Capa 1)
+Inferencia inteligente ultra-optimizada con:
+- Recorte dinámico de contexto (Sliding Window de 3 intercambios / 6 mensajes).
+- Límite estricto de tokens de salida (max_output_tokens=150).
+- Limitador de tasa del cliente (Cooldown de 2.0s).
+- Cascada de modelos y reintento automático con Backoff de 5s ante 429.
+- Detección inteligente de emociones y proyecciones contextuales para el Visor Robótico.
+"""
+import functools
+import re
+import time
+from typing import Callable, Optional, List, Set, Tuple
+from google import genai
+from google.genai import types
+
+import config
+from tools.system_tools import (
+    search_youtube,
+    open_url,
+    launch_application,
+    control_media,
+    system_info
+)
+
+
+def safe_print(msg: str):
+    """Imprime mensajes de forma segura en consolas con codificación restringida."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode("ascii", errors="replace").decode("ascii"))
+
+
+def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[str], float]:
+    """
+    Analiza el prompt del usuario y la respuesta de Gemini para determinar
+    la emoción visual y los iconos contextuales a proyectar en el visor EMO / Vector.
+
+    Retorna: (expression_name, icon_name, icon_duration)
+    """
+    text = (prompt + " " + response).lower()
+
+    # 1. Proyecciones contextuales de iconos
+    if any(k in text for k in ["helado", "ice cream", "nieve", "paleta", "cono de helado", "postre"]):
+        return "wink", "ice_cream", 4.0
+    if any(k in text for k in ["musica", "música", "cancion", "canción", "spotify", "youtube", "melodia", "ritmo", "sound"]):
+        return "happy", "music", 3.5
+    if any(k in text for k in ["busca", "buscar", "investiga", "google", "consulta", "lupa", "rastreo", "analiza"]):
+        return "thinking", "search", 3.5
+    if any(k in text for k in ["hora", "tiempo", "reloj", "alarma", "fecha", "cronometro"]):
+        return "idle", "clock", 4.0
+    if any(k in text for k in ["bateria", "batería", "energia", "energía", "voltaje", "carga"]):
+        return "idle", "battery", 3.5
+    if any(k in text for k in ["calcula", "calcular", "matematica", "suma", "resta", "multiplica", "ecuacion", "cuenta"]):
+        return "happy", "calc", 3.5
+
+    # 2. Expresiones faciales
+    if any(k in text for k in ["cool", "gafas", "lentes", "facha", "fachero", "chido", "crack", "estilo", "thug life"]):
+        return "cool_shades", None, 6.0
+    if any(k in text for k in ["feliz", "alegre", "excelente", "maravilloso", "gracias", "genial", "jaja", "jeje", "risa", "chiste", "broma", "buen trabajo"]):
+        return "happy", None, 3.5
+    if any(k in text for k in ["sorpresa", "increible", "increíble", "asombroso", "cuidado", "peligro", "alerta", "atencion", "ojo"]):
+        return "surprise", None, 3.5
+    if any(k in text for k in ["duerme", "descansa", "reposo", "dormir", "sueño", "buenas noches", "apagate"]):
+        return "sleeping", None, 5.0
+    if any(k in text for k in ["pensando", "analizando", "procesando", "verificando", "diagnostico"]):
+        return "thinking", None, 3.5
+
+    return "idle", None, 0.0
+
+
+class GeminiAgent:
+    AVAILABLE_MODELS: List[str] = getattr(config, "AVAILABLE_MODELS", [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-3.8-flash",
+        "gemini-flash-latest",
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+    ])
+
+    def __init__(
+        self,
+        on_tool_call: Optional[Callable[[str, dict, str], None]] = None,
+        on_model_change: Optional[Callable[[str], None]] = None,
+        on_emotion: Optional[Callable[[str, Optional[str], float], None]] = None
+    ):
+        """
+        Inicializa el agente de VEX con control estricto de cuota y tolerancia a fallos.
+        """
+        self.on_tool_call = on_tool_call
+        self.on_model_change = on_model_change
+        self.on_emotion = on_emotion
+        self.client: Optional[genai.Client] = None
+        self.chat = None
+        self.active_model: str = getattr(config, "DEFAULT_MODEL", self.AVAILABLE_MODELS[0])
+        self.known_unavailable: Set[str] = set()
+
+        # Control de tasa local (Cooldown de 2.0 segundos entre llamadas)
+        self.last_api_call_time: float = 0.0
+        self.min_request_interval: float = 2.0
+
+        # Límite de ventana deslizante: 3 turnos (6 mensajes: 3 usuario + 3 modelo)
+        self.max_history_messages: int = 6
+
+        self.raw_tools = [
+            search_youtube,
+            open_url,
+            launch_application,
+            control_media,
+            system_info
+        ]
+        self._initialize_client()
+
+    def _wrap_tool(self, func: Callable) -> Callable:
+        """Envuelve una herramienta para capturar la ejecución y notificar a la UI."""
+        @functools.wraps(func)
+        def wrapper(**kwargs):
+            try:
+                result = func(**kwargs)
+            except Exception as e:
+                result = f"Error al ejecutar {func.__name__}: {e}"
+            if self.on_tool_call:
+                try:
+                    self.on_tool_call(func.__name__, kwargs, str(result))
+                except Exception as ex:
+                    safe_print(f"[VEX Core] Error en callback de herramienta: {ex}")
+            return result
+        return wrapper
+
+    def _build_chat_config(self) -> types.GenerateContentConfig:
+        """
+        Construye la configuración del chat con instrucciones tácticas y
+        límite estricto de tokens de salida (150 tokens) para ahorro extremo.
+        """
+        wrapped_tools = [self._wrap_tool(fn) for fn in self.raw_tools]
+        prompt = config.build_system_prompt()
+        return types.GenerateContentConfig(
+            system_instruction=prompt,
+            tools=wrapped_tools,
+            temperature=0.7,
+            max_output_tokens=150,  # Límite táctico de salida concisa
+        )
+
+    def _create_chat_session(self, model_name: str, history: Optional[list] = None):
+        """Crea una sesión de chat con el modelo especificado y recorte de historial."""
+        if not self.client:
+            return None
+        chat_config = self._build_chat_config()
+        return self.client.chats.create(
+            model=model_name,
+            config=chat_config,
+            history=history or []
+        )
+
+    def _initialize_client(self):
+        """Inicializa el cliente de Gemini y la sesión de chat inicial."""
+        api_key = config.get_api_key()
+        if not api_key:
+            self.client = None
+            self.chat = None
+            return
+
+        try:
+            self.client = genai.Client(api_key=api_key)
+            self.chat = self._create_chat_session(self.active_model)
+        except Exception as e:
+            safe_print(f"[VEX Core] Inicialización de cliente en espera: {self._sanitize_error(str(e))}")
+            self.client = None
+            self.chat = None
+
+    def _trim_chat_history(self):
+        """
+        Recorte dinámico de contexto (Sliding Window):
+        Mantiene en memoria únicamente los últimos 3 intercambios (6 mensajes).
+        """
+        if self.chat is None:
+            return
+
+        try:
+            full_history = self.chat.get_history()
+            if len(full_history) > self.max_history_messages:
+                trimmed = full_history[-self.max_history_messages:]
+                self.chat = self._create_chat_session(self.active_model, history=trimmed)
+        except Exception as e:
+            safe_print(f"[VEX Core] Advertencia en recorte de historial: {self._sanitize_error(str(e))}")
+
+    def _enforce_rate_limit(self):
+        """
+        Controlador de tasa local del cliente:
+        Garantiza que no se dispare más de 1 petición cada 2.0 segundos.
+        """
+        now = time.time()
+        elapsed = now - self.last_api_call_time
+        if elapsed < self.min_request_interval:
+            wait_time = self.min_request_interval - elapsed
+            time.sleep(wait_time)
+        self.last_api_call_time = time.time()
+
+    def reload_api_key(self):
+        """Recarga la clave de API desde la configuración y reinicia el cliente."""
+        self.known_unavailable.clear()
+        self._initialize_client()
+
+    def is_configured(self) -> bool:
+        """Verifica si existe una API Key válida configurada."""
+        return self.client is not None and bool(config.get_api_key())
+
+    def set_model(self, model_name: str) -> bool:
+        """Cambia el modelo activo si es soportado."""
+        if model_name in self.AVAILABLE_MODELS:
+            self.active_model = model_name
+            if self.client:
+                try:
+                    self.chat = self._create_chat_session(model_name)
+                    safe_print(f"[VEX Core] Canal neuronal vinculado a: {model_name}")
+                    return True
+                except Exception as e:
+                    safe_print(f"[VEX Core] Error al vincular modelo {model_name}: {self._sanitize_error(str(e))}")
+            return True
+        return False
+
+    def reset_chat(self):
+        """Reinicia la conversación actual de VEX."""
+        if self.client:
+            self.chat = self._create_chat_session(self.active_model)
+
+    def _sanitize_error(self, raw_err: str) -> str:
+        """Limpia cadenas crudas de error JSON para proteger la consola."""
+        cleaned = re.sub(r"\{.*?\}", "", raw_err, flags=re.DOTALL)
+        cleaned = re.sub(r"\[.*?\]", "", cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r"[\n\r\t]+", " ", cleaned)
+        cleaned = cleaned.replace("ClientError", "").replace("ServerError", "").replace("APIError", "")
+        cleaned = cleaned.strip(" :.-")
+        if not cleaned:
+            cleaned = "Error de comunicación con el servicio de IA"
+        return cleaned
+
+    def send_message(self, message: str) -> str:
+        """
+        Envía un mensaje al modelo (Capa 1: Inferencia Inteligente) con:
+        - Freno de tasa (2s).
+        - Recorte dinámico de historial (últimos 3 intercambios).
+        - Backoff automático de 5s ante código 429.
+        - Failover Pool multimodelo.
+        - Detección de emociones e iconos contextuales.
+        """
+        if not self.is_configured():
+            return (
+                "⚠️ Clave de API no configurada. Por favor abre el panel '⚙ BYOK CONFIG' "
+                "e ingresa tu Gemini API Key de Google AI Studio para activar los sistemas."
+            )
+
+        if self.chat is None:
+            try:
+                self.chat = self._create_chat_session(self.active_model)
+            except Exception as e:
+                safe_print(f"[VEX Core] Error al crear sesión inicial con {self.active_model}: {self._sanitize_error(str(e))}")
+
+        # Ordenar modelos priorizando los que no han arrojado 404
+        available_candidates = [m for m in self.AVAILABLE_MODELS if m not in self.known_unavailable and m != self.active_model]
+        models_to_try = [self.active_model] + available_candidates + [m for m in self.AVAILABLE_MODELS if m in self.known_unavailable and m != self.active_model]
+
+        last_error = None
+        rate_limit_occurred = False
+
+        for idx, model_name in enumerate(models_to_try):
+            try:
+                # 1. Aplicar limitador de tasa del cliente (2 segundos entre llamadas)
+                self._enforce_rate_limit()
+
+                # 2. Recortar historial a los últimos 3 intercambios
+                self._trim_chat_history()
+
+                # 3. Conmutar sesión si el modelo cambió
+                if self.active_model != model_name or self.chat is None:
+                    safe_print(f"[VEX Core] Conmutando canal neuronal al modelo '{model_name}'...")
+                    hist = []
+                    if self.chat:
+                        try:
+                            hist = self.chat.get_history()[-self.max_history_messages:]
+                        except Exception:
+                            pass
+                    self.chat = self._create_chat_session(model_name, history=hist)
+
+                # 4. Enviar mensaje
+                response = self.chat.send_message(message)
+                if response and response.text:
+                    prev_model = self.active_model
+                    self.active_model = model_name
+                    # Post-recorte de historial tras respuesta
+                    self._trim_chat_history()
+
+                    if prev_model != model_name and self.on_model_change:
+                        try:
+                            self.on_model_change(model_name)
+                        except Exception:
+                            pass
+
+                    reply = response.text.strip()
+
+                    # 5. Detección de emoción / icono contextual
+                    expr, icon, dur = detect_emotion_and_icon(message, reply)
+                    if self.on_emotion:
+                        try:
+                            self.on_emotion(expr, icon, dur)
+                        except Exception as ex:
+                            safe_print(f"[VEX Core] Error en callback de emoción: {ex}")
+
+                    return reply
+                return "Orden procesada con éxito."
+
+            except Exception as e:
+                err_str = str(e)
+                last_error = e
+
+                # Si es un error de clave de API inválida, detener failover
+                if "API_KEY_INVALID" in err_str or "API key not valid" in err_str:
+                    safe_print("[VEX Core] Alerta: Clave API de Gemini rechazada por el servidor.")
+                    return "❌ La API Key proporcionada no es válida. Por favor verifica tus credenciales en '⚙ BYOK CONFIG'."
+
+                # MANEJO DE ERROR 429 (Resource Exhausted) CON BACKOFF DE 5 SEGUNDOS
+                if "ResourceExhausted" in err_str or "429" in err_str:
+                    rate_limit_occurred = True
+                    safe_print("[VEX Core] Límite de cuota detectado (429). Aplicando backoff de 5 segundos...")
+                    time.sleep(5.0)
+
+                    # Reintento con backoff sobre el mismo modelo o paso al siguiente en la cascada
+                    try:
+                        self._enforce_rate_limit()
+                        response = self.chat.send_message(message)
+                        if response and response.text:
+                            self._trim_chat_history()
+                            reply = response.text.strip()
+                            expr, icon, dur = detect_emotion_and_icon(message, reply)
+                            if self.on_emotion:
+                                try:
+                                    self.on_emotion(expr, icon, dur)
+                                except Exception:
+                                    pass
+                            return reply
+                    except Exception as retry_err:
+                        err_str = str(retry_err)
+                        last_error = retry_err
+
+                # Detección de modelo no disponible (404, deprecado o 503 saturado)
+                is_404_deprec = (
+                    "404" in err_str
+                    or "NOT_FOUND" in err_str
+                    or "no longer available" in err_str
+                    or "not found" in err_str.lower()
+                )
+
+                if is_404_deprec:
+                    self.known_unavailable.add(model_name)
+
+                is_failover_trigger = is_404_deprec or "503" in err_str or "UNAVAILABLE" in err_str
+
+                if is_failover_trigger and idx < len(models_to_try) - 1:
+                    next_model = models_to_try[idx + 1]
+                    safe_print(f"[VEX Core] Modelo '{model_name}' no disponible. Conmutando Failover Pool a '{next_model}'...")
+                    continue
+                else:
+                    break
+
+        # Si agotamos el pool o persiste 429 tras backoff
+        err_msg = str(last_error) if last_error else "Error desconocido"
+        safe_print(f"[VEX Core] Error en transmisión: {self._sanitize_error(err_msg)}")
+
+        if rate_limit_occurred or "ResourceExhausted" in err_msg or "429" in err_msg:
+            return "Canal de inferencia temporalmente ocupado, dame un segundo."
+        elif "503" in err_msg or "UNAVAILABLE" in err_msg:
+            return "Los servidores de Gemini presentan alta demanda. Reintentando enlace en unos instantes."
+        elif "Failed to connect" in err_msg or "getaddrinfo" in err_msg:
+            return "Error de enlace de red. No se pudo conectar con el satélite de IA. Revisa tu internet."
+        else:
+            return "VEX: No se pudo establecer conexión táctica con el modelo de IA. Sistemas en espera."
