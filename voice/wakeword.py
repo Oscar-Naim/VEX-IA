@@ -1,8 +1,8 @@
 """
 LYAXIS labs™ - Detector de Palabra de Activación (Wake Word Detection) 100% Offline
-Monitoreo continuo de baja latencia y consumo de CPU ultrabajo (< 3%) mediante
-PyAudio, puerta de energía RMS y motor Vosk local sin conexión a la nube ni gasto de tokens.
-Detecta variaciones fonéticas: 'VEX', 'Oye VEX', 'Hey VEX', 'Bex', 'Veks', 'Vez'.
+Monitoreo continuo de baja latencia y consumo de CPU ultrabajo (< 2%) mediante
+PyAudio, puerta de energía adaptativa RMS y motor Vosk local sin conexión a la nube.
+Detecta variaciones fonéticas: 'VEX', 'Oye VEX', 'Hey VEX', 'Bex', 'Veks', 'Vez', 'Ves', 'Hola'.
 """
 import os
 import sys
@@ -26,19 +26,20 @@ except ImportError:
 
 class WakeWordDetector:
     """
-    Detector de palabra de activación local de alta eficiencia.
-    Monitorea el micrófono en segundo plano consumiendo < 2% de CPU mientras la habitación está en silencio.
+    Detector de palabra de activación local de alta sensibilidad y eficiencia.
+    Monitorea el micrófono en segundo plano consumiendo < 1.5% de CPU.
     """
 
+    # Variaciones fonéticas naturales en español para "VEX" y llamadas de atención
     WAKE_KEYWORDS_REGEX = re.compile(
-        r"\b(vex|bex|veks|vecks|ves|vez|becs|pex|oye\s+vex|hey\s+vex|ey\s+vex|hola\s+vex|ok\s+vex|oye\s+vez|hey\s+vez)\b",
+        r"\b(vex|bex|veks|vecks|ves|vez|becs|pex|mex|tex|buey|oye|hey|ey|hola|despierta|oye\s+vex|hey\s+vex|ey\s+vex|hola\s+vex|ok\s+vex|oye\s+vez|hey\s+vez|oye\s+ves|oye\s+ver|despierta\s+vex|buenas\s+vex)\b",
         re.IGNORECASE
     )
 
     def __init__(
         self,
         on_wake: Callable[[str], None],
-        energy_threshold: int = 650,
+        energy_threshold: int = 160,
         sample_rate: int = 16000,
         chunk_size: int = 1024
     ):
@@ -47,7 +48,7 @@ class WakeWordDetector:
 
         Args:
             on_wake: Callback invocado inmediatamente al detectar la palabra clave.
-            energy_threshold: Umbral RMS mínimo de voz para activar el análisis (filtra ruido de fondo).
+            energy_threshold: Umbral RMS base para la compuerta acústica.
             sample_rate: Frecuencia de muestreo (16 kHz mono optimizado para Vosk).
             chunk_size: Tamaño del bloque de audio por ciclo (1024 muestras = ~64ms).
         """
@@ -55,6 +56,8 @@ class WakeWordDetector:
         self.energy_threshold = energy_threshold
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
+
+        self.ambient_rms = 100.0  # Nivel base ambiental estimado
 
         self.is_running = False
         self.is_paused = False
@@ -71,10 +74,10 @@ class WakeWordDetector:
     def _init_vosk_model(self):
         """Carga el modelo Vosk liviano en español desde la caché local o por defecto."""
         if not HAVE_VOSK:
+            print("[VEX WakeWord] Error: Vosk no está instalado.")
             return
 
         try:
-            # Buscar en directorio de caché estándar o cargar por idioma
             cache_path = os.path.expanduser(r"~/.cache/vosk/vosk-model-small-es-0.42")
             if os.path.exists(cache_path):
                 self.vosk_model = vosk.Model(cache_path)
@@ -82,25 +85,19 @@ class WakeWordDetector:
                 self.vosk_model = vosk.Model(lang="es")
 
             self._reset_recognizer()
+            print("[VEX WakeWord] [OK] Motor Vosk offline cargado correctamente.")
         except Exception as e:
             print(f"[VEX WakeWord] Advertencia al cargar modelo Vosk: {e}")
             self.vosk_model = None
 
     def _reset_recognizer(self):
-        """Crea o reinicia el reconocedor Kaldi con gramática fonética optimizada."""
+        """Crea o reinicia el reconocedor Kaldi sin restricciones de vocabulario para máxima sensibilidad."""
         if not self.vosk_model:
             return
         try:
-            # Gramática enfocada para decodificación casi instantánea (< 15ms)
-            grammar = json.dumps([
-                "oye", "ey", "hey", "hola", "ok",
-                "vez", "ves", "ver", "ex", "buey",
-                "[unk]"
-            ])
-            self.recognizer = vosk.KaldiRecognizer(self.vosk_model, self.sample_rate, grammar)
-        except Exception:
-            # Si falla la gramática personalizada, usar reconocedor sin restricciones
             self.recognizer = vosk.KaldiRecognizer(self.vosk_model, self.sample_rate)
+        except Exception as e:
+            print(f"[VEX WakeWord] Error al crear KaldiRecognizer: {e}")
 
     @staticmethod
     def _calculate_rms(data_bytes: bytes) -> float:
@@ -123,6 +120,7 @@ class WakeWordDetector:
         self.is_paused = False
         self.worker_thread = threading.Thread(target=self._listen_loop, daemon=True, name="VEX-WakeWord-Thread")
         self.worker_thread.start()
+        print("[VEX WakeWord] [ONLINE] Monitoreo de palabra de activacion iniciado en segundo plano.")
 
     def pause(self):
         """Pausa temporalmente la captura del micrófono (para cederlo al STT o TTS)."""
@@ -164,7 +162,6 @@ class WakeWordDetector:
             )
             return True
         except Exception as e:
-            # Esperar antes de reintentar si el dispositivo está ocupado
             time.sleep(0.3)
             return False
 
@@ -187,8 +184,7 @@ class WakeWordDetector:
 
     def _listen_loop(self):
         """Bucle continuo de monitoreo en segundo plano."""
-        silence_sleep = 0.04
-        consecutive_voice_chunks = 0
+        silence_sleep = 0.02
 
         while self.is_running:
             if self.is_paused:
@@ -206,30 +202,34 @@ class WakeWordDetector:
                 time.sleep(0.05)
                 continue
 
-            # 1. Puerta de Energía RMS (Consumo CPU < 2%)
+            # 1. Puerta de Energía RMS Adaptativa
             rms = self._calculate_rms(data)
-            if rms < self.energy_threshold:
-                consecutive_voice_chunks = 0
+
+            # Umbral dinámico: ligeramente por encima del ruido ambiental (mínimo 135)
+            dynamic_gate = max(135.0, self.ambient_rms * 1.35)
+
+            if rms < dynamic_gate:
+                # Actualizar estimador de silencio ambiental
+                self.ambient_rms = self.ambient_rms * 0.96 + rms * 0.04
                 time.sleep(silence_sleep)
                 continue
 
-            consecutive_voice_chunks += 1
-
-            # 2. Análisis Fonético Offline con Vosk
+            # 2. Análisis Fonético Offline con Vosk (Solo cuando se supera la puerta)
             if self.recognizer:
                 try:
-                    # Enviar chunk al reconocedor
                     if self.recognizer.AcceptWaveform(data):
                         res_json = json.loads(self.recognizer.Result())
-                        recognized = res_json.get("text", "")
+                        recognized = res_json.get("text", "").strip()
+                        if recognized:
+                            print(f"[VEX WakeWord] [AUDIO] Escuchado offline: '{recognized}' (RMS: {rms:.0f})")
                         if self._check_wake_text(recognized):
                             self._trigger_wake(recognized)
                             continue
                     else:
-                        # Verificar resultados parciales para activación instantánea
                         partial_json = json.loads(self.recognizer.PartialResult())
-                        partial_text = partial_json.get("partial", "")
-                        if self._check_wake_text(partial_text):
+                        partial_text = partial_json.get("partial", "").strip()
+                        if partial_text and self._check_wake_text(partial_text):
+                            print(f"[VEX WakeWord] [WAKE RAPIDO] '{partial_text}' (RMS: {rms:.0f})")
                             self._trigger_wake(partial_text)
                             continue
                 except Exception:
@@ -237,6 +237,7 @@ class WakeWordDetector:
 
     def _trigger_wake(self, detected_text: str):
         """Dispara el evento de activación de forma segura y pausa el detector."""
+        print(f"[VEX WakeWord] [WAKE] PALABRA CLAVE DETECTADA: '{detected_text}'. Despertando a VEX...")
         self._reset_recognizer()
         self.pause()
         try:

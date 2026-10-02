@@ -39,7 +39,7 @@ class LocalIntentRouter:
         """Normaliza el texto eliminando puntuación y acentos para coincidencia robusta."""
         s = text.lower().strip()
         # Eliminar invocaciones iniciales al asistente
-        s = re.sub(r"^(vex|oye vex|hey vex|asistente)\s*[,.:;]?\s*", "", s).strip()
+        s = re.sub(r"^(vex|oye vex|hey vex|ey vex|hola vex|ok vex|buenas vex|asistente)\s*[,.:;]?\s*", "", s).strip()
         # Normalizar acentos
         replacements = [("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u")]
         for a, b in replacements:

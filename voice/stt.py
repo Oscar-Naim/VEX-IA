@@ -1,7 +1,7 @@
 """
 LYAXIS labs™ - Motor de Reconocimiento de Voz (STT) para VEX
-Filtro estricto de ruido ambiental (umbral 3000), descarte de monosílabos/ruido (< 2 palabras),
-y soporte para modo conversación continua manos libres.
+Captura adaptativa de audio con SpeechRecognition, ajuste automático al ruido ambiental,
+y soporte para comandos breves y conversación natural.
 """
 import time
 import threading
@@ -25,13 +25,15 @@ class SpeechToTextListener:
 
         self.recognizer = sr.Recognizer()
 
-        # UMBRAL FIJO DE ENERGÍA (2800 - 3200) para filtrar ventiladores y tecleo
-        self.recognizer.energy_threshold = 3000
-        self.recognizer.dynamic_energy_threshold = False
+        # Ajuste dinámico de energía adaptado al entorno del usuario
+        self.recognizer.dynamic_energy_threshold = True
+        self.recognizer.dynamic_energy_adjustment_damping = 0.15
+        self.recognizer.dynamic_energy_ratio = 1.5
+        self.recognizer.energy_threshold = 250  # Umbral inicial sensible
 
-        # Detección de fin de habla por silencio
+        # Detección de fin de habla por silencio natural
         self.recognizer.pause_threshold = 0.8
-        self.recognizer.non_speaking_duration = 0.5
+        self.recognizer.non_speaking_duration = 0.4
 
         self._is_listening = False
         self._current_thread = None
@@ -48,7 +50,7 @@ class SpeechToTextListener:
 
         self._stop_requested = False
         self._is_listening = True
-        self._current_thread = threading.Thread(target=self._capture_audio, daemon=True)
+        self._current_thread = threading.Thread(target=self._capture_audio, daemon=True, name="VEX-STT-Worker")
         self._current_thread.start()
 
     def stop_listening(self):
@@ -57,7 +59,7 @@ class SpeechToTextListener:
         self._is_listening = False
 
     def _capture_audio(self):
-        """Captura audio con filtro estricto de duración y palabras mínimas."""
+        """Captura audio del micrófono y realiza el reconocimiento."""
         if self.on_listening_start and not self._stop_requested:
             try:
                 self.on_listening_start()
@@ -69,11 +71,9 @@ class SpeechToTextListener:
                 if self._stop_requested:
                     return
 
-                # Calibración rápida inicial
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.25)
-                # Asegurar que el umbral no caiga por debajo de 2800 tras ajuste
-                if self.recognizer.energy_threshold < 2800:
-                    self.recognizer.energy_threshold = 3000
+                # Calibración rápida de ruido de fondo (0.3s)
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
+                print(f"[VEX STT] [MIC] Microfono activo (umbral de energia: {self.recognizer.energy_threshold:.1f}). Esperando orden...")
 
                 if self._stop_requested:
                     return
@@ -84,54 +84,60 @@ class SpeechToTextListener:
                     except Exception:
                         pass
 
-                start_capture_time = time.time()
-                audio = self.recognizer.listen(source, timeout=6.0, phrase_time_limit=12.0)
-                capture_duration = time.time() - start_capture_time
+                # Captura la frase del usuario
+                audio = self.recognizer.listen(source, timeout=6.0, phrase_time_limit=10.0)
 
             if self._stop_requested:
                 return
 
-            # FILTRO 1: Descartar sonidos ultracortos (< 0.8 segundos) como carraspeos o clics
-            if capture_duration < 0.8:
-                if self.on_timeout and not self._stop_requested:
-                    self.on_timeout()
-                return
+            print("[VEX STT] [AUDIO] Capturado. Transcribiendo...")
 
-            # Transcripción a texto usando Google Speech Recognition en español
-            raw_text = self.recognizer.recognize_google(audio, language="es-ES")
+            # Transcripción a texto usando Google Speech Recognition
+            raw_text = ""
+            try:
+                raw_text = self.recognizer.recognize_google(audio, language="es-MX")
+            except sr.UnknownValueError:
+                try:
+                    raw_text = self.recognizer.recognize_google(audio, language="es-ES")
+                except Exception:
+                    raw_text = ""
+
             text = raw_text.strip()
-
-            if self._stop_requested or not text:
+            if self._stop_requested:
                 return
 
-            # FILTRO 2: Descartar capturas con menos de 2 palabras ("eh", "um", ruidos aislados)
-            words = text.split()
-            if len(words) < 2:
-                # Descarte silencioso sin escalar a Gemini ni mostrar error
+            if not text:
+                print("[VEX STT] No se detecto ninguna palabra clara.")
                 if self.on_timeout and not self._stop_requested:
                     self.on_timeout()
                 return
 
-            # Si pasa los filtros, entregar resultado
+            print(f"[VEX STT] [OK] Orden vocalizada reconocida: '{text}'")
+
+            # Entregar resultado al orquestador
             if self.on_result and not self._stop_requested:
                 self.on_result(text)
 
         except sr.WaitTimeoutError:
+            print("[VEX STT] Tiempo de espera agotado (silencio en la habitación).")
             if not self._stop_requested:
                 if self.on_timeout:
                     self.on_timeout()
                 elif self.on_error:
-                    self.on_error("Tiempo de espera agotado. No se detectó audio.")
+                    self.on_error("Tiempo de espera agotado.")
         except sr.UnknownValueError:
+            print("[VEX STT] No se pudo interpretar el audio.")
             if not self._stop_requested:
                 if self.on_timeout:
                     self.on_timeout()
                 elif self.on_error:
                     self.on_error("No se pudo interpretar el audio.")
         except sr.RequestError as e:
+            print(f"[VEX STT] Error de conexión: {e}")
             if not self._stop_requested and self.on_error:
                 self.on_error(f"Error de conexión con el servicio de voz: {e}")
         except Exception as e:
+            print(f"[VEX STT] Error en micrófono: {e}")
             if not self._stop_requested and self.on_error:
                 self.on_error(f"Error en micrófono: {e}")
         finally:

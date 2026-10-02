@@ -240,7 +240,7 @@ class MainWindow(ctk.CTk):
         # Inicialización del orquestador de voz con Wake Word Detection
         self.voice_mgr = VoiceAssistantManager(
             on_state_change=self._on_assistant_state_change,
-            on_user_command=self._handle_user_prompt,
+            on_user_command=self._on_user_voice_command,
             on_wake_flash=self._on_wake_flash_triggered
         )
         self.tts = self.voice_mgr.tts
@@ -1114,6 +1114,11 @@ class MainWindow(ctk.CTk):
         self.after(0, lambda: self._add_message_card("system", msg))
 
     # ================= ORQUESTACIÓN DEL ASISTENTE Y WAKE WORD =================
+
+    def _on_user_voice_command(self, recognized_text: str):
+        """Recepción thread-safe de comandos de voz hacia la interfaz gráfica."""
+        print(f"[UI] [VOZ] Procesando orden de voz en hilo principal: '{recognized_text}'")
+        self.after(0, lambda: self._handle_user_prompt(recognized_text))
 
     def _on_wake_flash_triggered(self):
         """Dispara el destello y halo cian neón en el visor al detectar la palabra clave 'VEX'."""
