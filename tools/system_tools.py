@@ -94,7 +94,12 @@ def launch_application(app_name: str) -> str:
         "task manager": "taskmgr.exe",
         "configuracion": "ms-settings:",
         "ajustes": "ms-settings:",
-        "settings": "ms-settings:"
+        "settings": "ms-settings:",
+        "alarma": "ms-clock:",
+        "alarmas": "ms-clock:",
+        "reloj": "ms-clock:",
+        "temporizador": "ms-clock:",
+        "cronometro": "ms-clock:"
     }
 
     target = app_mapping.get(name_lower, name_lower)

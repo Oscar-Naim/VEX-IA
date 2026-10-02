@@ -147,7 +147,7 @@ class GeminiAgent:
         )
 
     def _sanitize_history(self, history: list) -> list:
-        """Filtra y sanea el historial asegurando que solo contenga roles válidos ('user', 'model')."""
+        """Filtra y sanea el historial asegurando que comience con 'user' y solo contenga roles válidos."""
         clean = []
         for item in history:
             try:
@@ -157,6 +157,14 @@ class GeminiAgent:
                     clean.append(item)
             except Exception:
                 pass
+
+        # Exigencia estricta de Gemini API: el historial DEBE iniciar con un turno de 'user'
+        while clean and getattr(clean[0], "role", None) != "user":
+            clean.pop(0)
+
+        if len(clean) < 2:
+            return []
+
         return clean
 
     def _create_chat_session(self, model_name: str, history: Optional[list] = None):
@@ -315,30 +323,36 @@ class GeminiAgent:
 
                 # 4. Enviar mensaje
                 response = self.chat.send_message(message)
-                if response and response.text:
-                    prev_model = self.active_model
-                    self.active_model = model_name
-                    # Post-recorte de historial tras respuesta
-                    self._trim_chat_history()
+                reply = ""
+                if response:
+                    try:
+                        reply = (response.text or "").strip()
+                    except Exception:
+                        pass
 
-                    if prev_model != model_name and self.on_model_change:
-                        try:
-                            self.on_model_change(model_name)
-                        except Exception:
-                            pass
+                if not reply:
+                    reply = "Orden táctica ejecutada con éxito."
 
-                    reply = response.text.strip()
+                prev_model = self.active_model
+                self.active_model = model_name
+                # Post-recorte de historial tras respuesta
+                self._trim_chat_history()
 
-                    # 5. Detección de emoción / icono contextual
-                    expr, icon, dur = detect_emotion_and_icon(message, reply)
-                    if self.on_emotion:
-                        try:
-                            self.on_emotion(expr, icon, dur)
-                        except Exception as ex:
-                            safe_print(f"[VEX Core] Error en callback de emoción: {ex}")
+                if prev_model != model_name and self.on_model_change:
+                    try:
+                        self.on_model_change(model_name)
+                    except Exception:
+                        pass
 
-                    return reply
-                return "Orden procesada con éxito."
+                # 5. Detección de emoción / icono contextual
+                expr, icon, dur = detect_emotion_and_icon(message, reply)
+                if self.on_emotion:
+                    try:
+                        self.on_emotion(expr, icon, dur)
+                    except Exception as ex:
+                        safe_print(f"[VEX Core] Error en callback de emoción: {ex}")
+
+                return reply
 
             except Exception as e:
                 err_str = str(e)
@@ -349,48 +363,71 @@ class GeminiAgent:
                     safe_print("[VEX Core] Alerta: Clave API de Gemini rechazada por el servidor.")
                     return "❌ La API Key proporcionada no es válida. Por favor verifica tus credenciales en '⚙ BYOK CONFIG'."
 
-                # MANEJO DE ERROR 429 (Resource Exhausted) CON BACKOFF DE 5 SEGUNDOS
+                # 1. Recuperación automática ante error de historial (400, InvalidArgument, roles desalineados)
+                if any(k in err_str.lower() for k in ["400", "history", "please ensure", "invalid argument", "role"]):
+                    safe_print(f"[VEX Core] Conflicto de historial con '{model_name}'. Reintentando con sesión limpia...")
+                    try:
+                        self.chat = self._create_chat_session(model_name, history=[])
+                        self._enforce_rate_limit()
+                        retry_resp = self.chat.send_message(message)
+                        retry_text = ""
+                        if retry_resp:
+                            try:
+                                retry_text = (retry_resp.text or "").strip()
+                            except Exception:
+                                pass
+                        if not retry_text:
+                            retry_text = "Orden procesada con éxito."
+                        expr, icon, dur = detect_emotion_and_icon(message, retry_text)
+                        if self.on_emotion:
+                            try:
+                                self.on_emotion(expr, icon, dur)
+                            except Exception:
+                                pass
+                        return retry_text
+                    except Exception as clean_err:
+                        err_str = str(clean_err)
+                        last_error = clean_err
+
+                # 2. Manejo de error 429 (Resource Exhausted) con backoff
                 if "ResourceExhausted" in err_str or "429" in err_str:
                     rate_limit_occurred = True
-                    safe_print("[VEX Core] Límite de cuota detectado (429). Aplicando backoff de 5 segundos...")
-                    time.sleep(5.0)
-
-                    # Reintento con backoff sobre el mismo modelo o paso al siguiente en la cascada
+                    safe_print(f"[VEX Core] Límite de cuota en '{model_name}'. Aplicando backoff de 3 segundos...")
+                    time.sleep(3.0)
                     try:
                         self._enforce_rate_limit()
-                        response = self.chat.send_message(message)
-                        if response and response.text:
-                            self._trim_chat_history()
-                            reply = response.text.strip()
-                            expr, icon, dur = detect_emotion_and_icon(message, reply)
-                            if self.on_emotion:
-                                try:
-                                    self.on_emotion(expr, icon, dur)
-                                except Exception:
-                                    pass
-                            return reply
+                        retry_resp = self.chat.send_message(message)
+                        retry_text = ""
+                        if retry_resp:
+                            try:
+                                retry_text = (retry_resp.text or "").strip()
+                            except Exception:
+                                pass
+                        if not retry_text:
+                            retry_text = "Orden procesada con éxito."
+                        expr, icon, dur = detect_emotion_and_icon(message, retry_text)
+                        if self.on_emotion:
+                            try:
+                                self.on_emotion(expr, icon, dur)
+                            except Exception:
+                                pass
+                        return retry_text
                     except Exception as retry_err:
                         err_str = str(retry_err)
                         last_error = retry_err
 
-                # Detección de modelo no disponible (404, deprecado o 503 saturado)
-                is_404_deprec = (
-                    "404" in err_str
-                    or "NOT_FOUND" in err_str
-                    or "no longer available" in err_str
-                    or "not found" in err_str.lower()
-                )
-
-                if is_404_deprec:
+                # 3. Detección de modelo deprecado o 404
+                if any(k in err_str for k in ["404", "NOT_FOUND", "not found"]):
                     self.known_unavailable.add(model_name)
 
-                is_failover_trigger = is_404_deprec or "503" in err_str or "UNAVAILABLE" in err_str
-
-                if is_failover_trigger and idx < len(models_to_try) - 1:
+                # 4. FAILOVER INCONDICIONAL: Pasar al siguiente modelo del pool
+                if idx < len(models_to_try) - 1:
                     next_model = models_to_try[idx + 1]
-                    safe_print(f"[VEX Core] Modelo '{model_name}' no disponible. Conmutando Failover Pool a '{next_model}'...")
+                    safe_print(f"[VEX Core] Fallo en '{model_name}'. Conmutando Failover Pool a '{next_model}'...")
+                    self.chat = self._create_chat_session(next_model, history=[])
                     continue
                 else:
+                    safe_print(f"[VEX Core] Agotados todos los modelos del Failover Pool.")
                     break
 
         # Si agotamos el pool o persiste 429 tras backoff

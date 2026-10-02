@@ -258,35 +258,35 @@ class LocalIntentRouter:
                 icon_duration=3.0
             )
 
-        # ---------------- GESTIÓN Y ESCRITURA EN BLOC DE NOTAS ----------------
-        # Detección de órdenes de escritura: "abre notas y escribe...", "abren notas y escribe...",
-        # "escribe en notas...", "anota en el bloc de notas...", "crea una nota...", "toma nota de..."
+        # ---------------- GESTIÓN Y ESCRITURA EN BLOC DE NOTAS Y RUTINAS ----------------
+        # Detección de órdenes de escritura: "abre notas y escribe...", "abren notas y escríbeme una rutina...",
+        # "dame una rutina de notas...", "escribe en notas...", "anota en el bloc de notas...", "crea una nota..."
         is_write_cmd = False
         raw_note_text = ""
 
-        # Patrón 1: "abre / abren notas y escribe / anota / pon [texto]"
+        # Patrón 1: "abre / abren notas y escribe / escríbeme / anota / pon [texto]"
         m_note1 = re.search(
-            r"\b(?:abre|abren|abrir|inicia|iniciar)\s+(?:el\s+)?(?:bloc\s+de\s+notas|notas)\s+y\s+(?:escribe|escribir|anota|anotar|redacta|redactar|pon|poner|apunta|apuntar|guarda|guardar)(?:\s+(.+))?$",
+            r"\b(?:abre|abren|abrir|inicia|iniciar)\s+(?:el\s+)?(?:bloc\s+de\s+notas|notas)\s+y\s+(?:escrib\w*|anot\w*|redact\w*|pon\w*|apunt\w*|guard\w*|haz\w*)(?:\s+(.+))?$",
             norm
         )
         if m_note1:
             is_write_cmd = True
             raw_note_text = (m_note1.group(1) or "").strip()
 
-        # Patrón 2: "escribe / anota / pon en notas / en el bloc de notas [texto]"
+        # Patrón 2: "escribe / escríbeme / anota en notas / en el bloc de notas [texto]"
         if not is_write_cmd:
             m_note2 = re.search(
-                r"\b(?:escribe|escribir|anota|anotar|redacta|redactar|pon|poner|apunta|apuntar|guarda|guardar)\s+(?:en\s+)?(?:el\s+)?(?:bloc\s+de\s+notas|notas)(?:\s+(.+))?$",
+                r"\b(?:escrib\w*|anot\w*|redact\w*|pon\w*|apunt\w*|guard\w*|haz\w*)\s+(?:en\s+)?(?:el\s+)?(?:bloc\s+de\s+notas|notas)(?:\s+(.+))?$",
                 norm
             )
             if m_note2:
                 is_write_cmd = True
                 raw_note_text = (m_note2.group(1) or "").strip()
 
-        # Patrón 3: "crea una nota / toma nota / haz una nota [que diga / con / de] [texto]"
+        # Patrón 3: "crea / dame / haz / toma una nota / rutina [de notas] [texto]"
         if not is_write_cmd:
             m_note3 = re.search(
-                r"\b(?:crea\s+una\s+nota|toma\s+nota|haz\s+una\s+nota|hazme\s+una\s+nota|nueva\s+nota)\s*(?:que\s+diga\s+|de\s+|con\s+|que\s+)?(.+)?$",
+                r"\b(?:crea\w*|toma\w*|haz\w*|dame)\s+(?:una\s+)?(?:nota|rutina)(?:\s+de\s+notas)?(?:\s+(.+))?$",
                 norm
             )
             if m_note3:
@@ -294,13 +294,46 @@ class LocalIntentRouter:
                 raw_note_text = (m_note3.group(1) or "").strip()
 
         if is_write_cmd:
-            # Caso A: El usuario pide escribir "lo que tú quieras", "lo que sea", etc. o no dio texto
+            is_routine = "rutina" in norm or "rutina" in raw_note_text
             generic_phrases = [
-                "", "lo que tu quieras", "lo que quieras", "lo que gustes",
+                "", "una", "uno", "una nota", "un texto", "un recordatorio",
+                "lo que tu quieras", "lo que quieras", "lo que gustes",
                 "lo que sea", "algo", "un saludo", "un mensaje", "lo que quieras tu",
                 "lo que te de la gana"
             ]
-            if raw_note_text in generic_phrases:
+
+            if is_routine:
+                # Rutina táctica de alto rendimiento
+                now_str = datetime.datetime.now().strftime("%d/%m/%Y")
+                note_content = (
+                    f"=====================================================\n"
+                    f"LYAXIS labs™ // PROTOCOLO DE RUTINA Y RENDIMIENTO\n"
+                    f"Operador: {user_name}\n"
+                    f"Fecha: {now_str}\n"
+                    f"Estado: Optimización de Sistemas y Enfoque Diario\n"
+                    f"=====================================================\n\n"
+                    f"[FASE 01 - ACTIVACIÓN MATUTINA (07:00 - 08:30)]\n"
+                    f"• 07:00 | Despertar, hidratación inmediata (500ml de agua) y luz solar.\n"
+                    f"• 07:15 | Movilidad articular, estiramientos y respiración activa (15 min).\n"
+                    f"• 07:45 | Desayuno balanceado con alto aporte proteico.\n\n"
+                    f"[FASE 02 - BLOQUE DE ENFOQUE PROFUNDO / DEEP WORK (09:00 - 13:30)]\n"
+                    f"• 09:00 | Tareas de máxima prioridad cognitiva y desarrollo de software.\n"
+                    f"• Método Pomodoro Táctico: 50 minutos de trabajo puro / 10 minutos de pausa visual.\n"
+                    f"• Cero distracciones, notificaciones silenciadas.\n\n"
+                    f"[FASE 03 - ENTRENAMIENTO & CONDICIÓN FÍSICA (17:00 - 18:30)]\n"
+                    f"• Calentamiento dinámico (8 min).\n"
+                    f"• Sesión de fuerza / gimnasio / entrenamiento funcional.\n"
+                    f"• Hidratación continua y registro de progreso.\n\n"
+                    f"[FASE 04 - DESCONEXIÓN & RECUPERACIÓN NOCTURNA (21:30 - 23:00)]\n"
+                    f"• Revisión de objetivos cumplidos del día y planificación de mañana.\n"
+                    f"• Desconexión de pantallas 45 minutos antes de dormir.\n"
+                    f"• Sueño reparador de 7 a 8 horas para máxima regeneración.\n\n"
+                    f"=====================================================\n"
+                    f"Registrado y sincronizado por VEX // LYAXIS labs™\n"
+                )
+                spoken = f"He abierto el Bloc de notas y redacté tu rutina de alto rendimiento, {user_name}."
+                doc_title = f"Rutina_{user_name}"
+            elif raw_note_text in generic_phrases:
                 now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                 note_content = (
                     f"=====================================================\n"
@@ -319,8 +352,9 @@ class LocalIntentRouter:
                     f"-- VEX Tactical AI"
                 )
                 spoken = f"He abierto el Bloc de notas y redacté un registro táctico para ti, {user_name}."
+                doc_title = f"Nota_{user_name}"
             else:
-                # Caso B: El usuario dictó texto específico
+                # Caso C: El usuario dictó texto específico
                 clean_text = raw_note_text
                 if clean_text.startswith("que "):
                     clean_text = clean_text[4:].strip()
@@ -342,11 +376,12 @@ class LocalIntentRouter:
                     f"Fecha: {now_str}\n"
                 )
                 spoken = f"He anotado '{clean_text}' en tu Bloc de notas, {user_name}."
+                doc_title = f"Nota_{user_name}"
 
-            res = write_note(note_content, title=f"Nota_{user_name}")
+            res = write_note(note_content, title=doc_title)
             return LocalRouteResult(
                 handled=True,
-                action_name="write_note:notepad",
+                action_name=f"write_note:{doc_title}",
                 execution_result=res,
                 spoken_response=spoken,
                 expression="happy",
@@ -359,7 +394,7 @@ class LocalIntentRouter:
             re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(el\s+)?(bloc\s+de\s+notas|notas)\b", norm)
             or norm in ["bloc de notas", "notas"]
         ):
-            if not re.search(r"\b(escribe|escribir|anota|anotar|redacta|redactar|pon|poner|apunta|apuntar)\b", norm):
+            if not re.search(r"\b(escrib\w*|anot\w*|redact\w*|pon\w*|apunt\w*|guard\w*|haz\w*)\b", norm):
                 res = launch_application("notepad.exe")
                 return LocalRouteResult(
                     handled=True,
@@ -370,6 +405,19 @@ class LocalIntentRouter:
                     icon="notes",
                     icon_duration=2.5
                 )
+
+        # Alarma / Temporizador / Reloj de Windows
+        if re.search(r"\b(pon|ponme|crea|inicia|abre|abren|ajusta)\s+(una\s+)?(alarma|temporizador|cronometro|reloj)\b", norm) or norm in ["alarma", "reloj", "temporizador", "cronometro"]:
+            res = launch_application("ms-clock:")
+            return LocalRouteResult(
+                handled=True,
+                action_name="launch_application:clock",
+                execution_result=res,
+                spoken_response=f"Abriendo la aplicación de reloj y alarmas del sistema, {user_name}.",
+                expression="happy",
+                icon="clock",
+                icon_duration=3.5
+            )
 
         # Abrir Navegador
         if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(el\s+)?(navegador|google|chrome)\b", norm):
