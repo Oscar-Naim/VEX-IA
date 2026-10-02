@@ -9,6 +9,7 @@ import time
 import queue
 import threading
 import asyncio
+import tempfile
 import re
 
 # Suprimir mensaje de bienvenida de pygame en consola
@@ -36,13 +37,12 @@ class TextToSpeechEngine:
         self.is_running = True
         self.is_speaking = False
         self.voice = getattr(config, "VEX_VOICE", "es-MX-JorgeNeural")
-        self.temp_file = getattr(config, "TEMP_AUDIO_FILE", "temp_vex_voice.mp3")
 
         # Inicializar el mezclador de audio de pygame
         self._init_mixer()
 
         # Iniciar hilo en segundo plano para procesar la cola de voz sin trabar la UI
-        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True, name="VEX-TTS-Worker")
         self.worker_thread.start()
 
     def _init_mixer(self):
@@ -86,63 +86,77 @@ class TextToSpeechEngine:
                 print(f"[VEX TTS] Error en callback on_end: {ex}")
 
     def _worker_loop(self):
-        """Bucle consumidor que corre en hilo secundario."""
-        while self.is_running:
-            try:
-                raw_text = self.queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
+        """Bucle consumidor que corre en hilo secundario con bucle de eventos persistente."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-            if raw_text is None or not self.is_running:
-                break
+        try:
+            while self.is_running:
+                try:
+                    raw_text = self.queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
 
-            text = self._clean_text(raw_text)
-            if not text:
-                self.queue.task_done()
-                continue
+                if raw_text is None or not self.is_running:
+                    break
 
-            try:
-                # 1. Generar audio con Edge-TTS
-                asyncio.run(self._generate_audio_file(text, self.temp_file))
-
-                if not os.path.exists(self.temp_file):
+                text = self._clean_text(raw_text)
+                if not text:
                     self.queue.task_done()
                     continue
 
-                # 2. Notificar inicio de habla (activa boca y animación en el visor)
-                self._notify_speaking(True)
-
-                # 3. Reproducir audio con pygame.mixer
-                self._init_mixer()
-                pygame.mixer.music.load(self.temp_file)
-                pygame.mixer.music.play()
-
-                # Esperar a que termine la reproducción o se ordene detener
-                while pygame.mixer.music.get_busy() and self.is_running and self.is_speaking:
-                    time.sleep(0.025)
-
-            except Exception as e:
-                print(f"[VEX TTS] Error en síntesis o reproducción: {e}")
-
-            finally:
-                # 4. Detener, liberar el archivo en Windows y notificar fin
+                temp_path = None
                 try:
-                    if pygame.mixer.get_init():
-                        pygame.mixer.music.stop()
-                        pygame.mixer.music.unload()
-                except Exception:
-                    pass
+                    # Crear archivo temporal único para evitar bloqueos por descriptores de archivo en Windows
+                    fd, temp_path = tempfile.mkstemp(prefix="vex_voice_", suffix=".mp3")
+                    os.close(fd)
 
-                # Intentar limpiar archivo temporal
-                try:
-                    if os.path.exists(self.temp_file):
-                        os.remove(self.temp_file)
-                except Exception:
-                    # En Windows se sobrescribirá en la siguiente orden
-                    pass
+                    # 1. Generar audio con Edge-TTS usando el event loop persistente
+                    loop.run_until_complete(self._generate_audio_file(text, temp_path))
 
-                self._notify_speaking(False)
-                self.queue.task_done()
+                    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                        self.queue.task_done()
+                        continue
+
+                    # 2. Notificar inicio de habla (activa boca y animación en el visor)
+                    self._notify_speaking(True)
+
+                    # 3. Reproducir audio con pygame.mixer
+                    self._init_mixer()
+                    pygame.mixer.music.load(temp_path)
+                    pygame.mixer.music.play()
+
+                    # Esperar a que termine la reproducción o se ordene detener
+                    while pygame.mixer.music.get_busy() and self.is_running and self.is_speaking:
+                        time.sleep(0.025)
+
+                except Exception as e:
+                    print(f"[VEX TTS] Error en síntesis o reproducción: {e}")
+
+                finally:
+                    # 4. Detener, liberar el archivo en Windows con unload() y notificar fin
+                    try:
+                        if pygame.mixer.get_init():
+                            pygame.mixer.music.stop()
+                            pygame.mixer.music.unload()
+                    except Exception:
+                        pass
+
+                    # Limpiar archivo temporal único de forma segura
+                    if temp_path:
+                        try:
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
+                        except Exception:
+                            pass
+
+                    self._notify_speaking(False)
+                    self.queue.task_done()
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
 
     def speak(self, text: str):
         """Encola un texto para ser vocalizado por la voz masculina de VEX."""

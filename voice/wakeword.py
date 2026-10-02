@@ -30,9 +30,9 @@ class WakeWordDetector:
     Monitorea el micrófono en segundo plano consumiendo < 1.5% de CPU.
     """
 
-    # Variaciones fonéticas naturales en español para "VEX" y llamadas de atención
+    # Variaciones fonéticas y frases de atención que requieren explícitamente "VEX" para evitar falsos positivos
     WAKE_KEYWORDS_REGEX = re.compile(
-        r"\b(vex|bex|veks|vecks|ves|vez|becs|pex|mex|tex|buey|oye|hey|ey|hola|despierta|oye\s+vex|hey\s+vex|ey\s+vex|hola\s+vex|ok\s+vex|oye\s+vez|hey\s+vez|oye\s+ves|oye\s+ver|despierta\s+vex|buenas\s+vex)\b",
+        r"\b((oye|hey|ey|hola|ok|buenas|despierta|asistente)\s+(vex|bex|veks|vecks|vez|ves)|vex|bex|veks|vecks|becs)\b",
         re.IGNORECASE
     )
 

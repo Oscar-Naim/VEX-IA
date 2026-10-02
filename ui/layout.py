@@ -853,7 +853,7 @@ class MainWindow(ctk.CTk):
         self._chat_bottom_spacer.pack(fill="x", pady=0)
 
         self._render_chats_list()
-        self._initial_greeting(speak_audio=False)
+        self.agent.reset_chat()
 
     def _switch_chat_session(self, session_id: str):
         """Cambia a la sesión de chat seleccionada y reconstruye sus mensajes."""
@@ -1260,14 +1260,34 @@ class MainWindow(ctk.CTk):
         if hasattr(self, "floating_widget") and self.floating_widget:
             self.floating_widget.set_expression("thinking")
 
+        # Bloquear entrada temporalmente para prevenir peticiones dobles concurrentes
+        self._set_input_enabled(False)
+
         def task():
-            response = self.agent.send_message(prompt)
+            try:
+                response = self.agent.send_message(prompt)
+            except Exception as e:
+                response = f"Error al procesar orden táctica: {e}"
             self.after(0, lambda: self._on_agent_response(response, from_voice=from_voice))
 
         threading.Thread(target=task, daemon=True).start()
 
+    def _set_input_enabled(self, enabled: bool):
+        """Habilita o deshabilita la entrada del usuario para prevenir solicitudes simultáneas."""
+        try:
+            if enabled:
+                self.entry_prompt.configure(state="normal", placeholder_text="Escribe una orden o pregunta a VEX...")
+                self.btn_send.configure(state="normal")
+                self.entry_prompt.focus()
+            else:
+                self.entry_prompt.configure(state="disabled", placeholder_text="Procesando orden táctica...")
+                self.btn_send.configure(state="disabled")
+        except Exception:
+            pass
+
     def _on_agent_response(self, response_text: str, from_voice: bool = False):
         self._add_message_card("agent", response_text)
+        self._set_input_enabled(True)
         self.voice_mgr.speak(response_text, from_voice=from_voice)
 
     def _on_tool_executed(self, tool_name: str, args: dict, result: str):

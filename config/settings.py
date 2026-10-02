@@ -62,8 +62,15 @@ DEFAULT_USER_CONFIG = {
 }
 
 
-def load_user_config() -> dict:
-    """Carga la configuración del usuario desde user_config.json o sincroniza con .env."""
+_CONFIG_CACHE = None
+
+
+def load_user_config(force_reload: bool = False) -> dict:
+    """Carga la configuración del usuario desde user_config.json con caché en memoria."""
+    global _CONFIG_CACHE
+    if _CONFIG_CACHE is not None and not force_reload:
+        return dict(_CONFIG_CACHE)
+
     config_data = dict(DEFAULT_USER_CONFIG)
 
     if USER_CONFIG_FILE.exists():
@@ -81,15 +88,18 @@ def load_user_config() -> dict:
             config_data["gemini_api_key"] = env_key
             save_user_config(config_data)
 
+    _CONFIG_CACHE = dict(config_data)
     return config_data
 
 
 def save_user_config(config_data: dict) -> bool:
-    """Guarda de forma persistente los parámetros del usuario en user_config.json."""
+    """Guarda de forma persistente los parámetros del usuario en user_config.json y refresca la caché."""
+    global _CONFIG_CACHE
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(USER_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=4, ensure_ascii=False)
+        _CONFIG_CACHE = dict(config_data)
         return True
     except Exception as e:
         print(f"[Settings] Error al guardar user_config.json: {e}")

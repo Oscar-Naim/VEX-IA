@@ -147,12 +147,24 @@ class RobotVisorCanvas(tk.Canvas):
     # ================= BUCLE PRINCIPAL DE DIBUJO =================
 
     def _animate(self):
-        """Bucle continuo de renderizado a ~33 FPS."""
+        """Bucle continuo de renderizado a ~33 FPS con optimización de CPU cuando está oculto."""
         try:
-            self._draw_frame()
+            if not self.winfo_exists():
+                return
+            # Si el lienzo no está mapeado en pantalla (ej. widget oculto o minimizado), suspender renderizado
+            if self.winfo_ismapped():
+                self._draw_frame()
+                delay = 30
+            else:
+                delay = 200  # Chequeo ligero de bajo consumo cuando está oculto
+        except Exception:
+            delay = 100
+
+        try:
+            if self.winfo_exists():
+                self.after(delay, self._animate)
         except Exception:
             pass
-        self.after(30, self._animate)
 
     def _draw_frame(self):
         """Renderiza un fotograma completo en el lienzo adaptando la escala dinámicamente."""

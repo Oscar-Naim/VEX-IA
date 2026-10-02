@@ -10,6 +10,7 @@ Inferencia inteligente ultra-optimizada con:
 import functools
 import re
 import time
+import threading
 from typing import Callable, Optional, List, Set, Tuple
 from google import genai
 from google.genai import types
@@ -56,6 +57,7 @@ def detect_emotion_and_icon(
             "SURPRISE": ("surprise", None, 4.0),
             "SLEEPING": ("sleeping", None, 6.0),
             "WINK": ("wink", None, 4.0),
+            "TACTICAL": ("cool_shades", None, 5.0),
             "IDLE": ("idle", None, 0.0),
         }
         if mood_clean in mood_map:
@@ -138,6 +140,7 @@ class GeminiAgent:
         self.chat = None
         self.active_model: str = getattr(config, "DEFAULT_MODEL", self.AVAILABLE_MODELS[0])
         self.known_unavailable: Set[str] = set()
+        self._send_lock = threading.Lock()
 
         # Control de tasa local (Cooldown de 2.0 segundos entre llamadas)
         self.last_api_call_time: float = 0.0
@@ -186,8 +189,24 @@ class GeminiAgent:
             max_output_tokens=150,  # Límite táctico de salida concisa
         )
 
+    @staticmethod
+    def _is_fn_call(item) -> bool:
+        """Determina si un mensaje contiene una llamada a función (model -> tool)."""
+        parts = getattr(item, "parts", []) or []
+        return any(getattr(p, "function_call", None) is not None for p in parts)
+
+    @staticmethod
+    def _is_fn_resp(item) -> bool:
+        """Determina si un mensaje contiene una respuesta de función (tool -> model)."""
+        parts = getattr(item, "parts", []) or []
+        return any(getattr(p, "function_response", None) is not None for p in parts)
+
     def _sanitize_history(self, history: list) -> list:
-        """Filtra y sanea el historial asegurando que comience con 'user' y solo contenga roles válidos."""
+        """
+        Filtra y sanea el historial asegurando:
+        1. Que comience con un turno legítimo de 'user' (que no sea un function_response huérfano).
+        2. Que ningún function_call quede desprovisto de su function_response correspondiente.
+        """
         clean = []
         for item in history:
             try:
@@ -198,9 +217,16 @@ class GeminiAgent:
             except Exception:
                 pass
 
-        # Exigencia estricta de Gemini API: el historial DEBE iniciar con un turno de 'user'
-        while clean and getattr(clean[0], "role", None) != "user":
+        # Exigencia estricta de Gemini API: el historial DEBE iniciar con un turno de 'user' normal
+        while clean:
+            first_role = getattr(clean[0], "role", None)
+            if first_role == "user" and not self._is_fn_resp(clean[0]):
+                break
             clean.pop(0)
+
+        # Si el último mensaje es un function_call que nunca recibió function_response, descartarlo
+        while clean and self._is_fn_call(clean[-1]):
+            clean.pop(-1)
 
         if len(clean) < 2:
             return []
@@ -250,7 +276,8 @@ class GeminiAgent:
     def _trim_chat_history(self):
         """
         Recorte dinámico de contexto (Sliding Window):
-        Mantiene en memoria únicamente los últimos 3 intercambios (6 mensajes).
+        Mantiene en memoria los últimos intercambios asegurando que ningún function_call
+        quede huérfano de su function_response correspondiente.
         """
         if self.chat is None:
             return
@@ -258,8 +285,17 @@ class GeminiAgent:
         try:
             full_history = self.chat.get_history()
             if len(full_history) > self.max_history_messages:
-                trimmed = full_history[-self.max_history_messages:]
-                self.chat = self._create_chat_session(self.active_model, history=trimmed)
+                # Buscar un punto de corte seguro donde comience un turno de usuario genuino
+                target_idx = max(0, len(full_history) - self.max_history_messages)
+                while target_idx < len(full_history):
+                    item = full_history[target_idx]
+                    if getattr(item, "role", None) == "user" and not self._is_fn_resp(item):
+                        break
+                    target_idx += 1
+
+                if target_idx < len(full_history) - 1:
+                    trimmed = full_history[target_idx:]
+                    self.chat = self._create_chat_session(self.active_model, history=trimmed)
         except Exception as e:
             safe_print(f"[VEX Core] Advertencia en recorte de historial: {self._sanitize_error(str(e))}")
 
@@ -317,12 +353,17 @@ class GeminiAgent:
     def send_message(self, message: str) -> str:
         """
         Envía un mensaje al modelo (Capa 1: Inferencia Inteligente) con:
+        - Bloqueo thread-safe contra peticiones concurrentes simultáneas.
         - Freno de tasa (2s).
         - Recorte dinámico de historial (últimos 3 intercambios).
         - Backoff automático de 5s ante código 429.
         - Failover Pool multimodelo.
         - Detección de emociones e iconos contextuales.
         """
+        with self._send_lock:
+            return self._send_message_locked(message)
+
+    def _send_message_locked(self, message: str) -> str:
         if not self.is_configured():
             return (
                 "⚠️ Clave de API no configurada. Por favor abre el panel '⚙ BYOK CONFIG' "

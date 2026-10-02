@@ -127,7 +127,8 @@ class UserMessageCard(ctk.CTkFrame):
             font=get_font_body(),
             text_color=TEXT_PRIMARY,
             justify="left",
-            anchor="w"
+            anchor="w",
+            wraplength=480
         )
         self.lbl_text.pack(fill="x", padx=14, pady=(0, 12))
 
@@ -250,7 +251,8 @@ class VexResponseCard(ctk.CTkFrame):
                 font=get_font_body(),
                 text_color=TEXT_PRIMARY,
                 justify="left",
-                anchor="w"
+                anchor="w",
+                wraplength=480
             )
             lbl.pack(fill="x", pady=2)
             self.text_labels.append(lbl)
@@ -267,7 +269,8 @@ class VexResponseCard(ctk.CTkFrame):
                     font=get_font_body(),
                     text_color=TEXT_PRIMARY,
                     justify="left",
-                    anchor="w"
+                    anchor="w",
+                    wraplength=480
                 )
                 lbl.pack(fill="x", pady=2)
                 self.text_labels.append(lbl)

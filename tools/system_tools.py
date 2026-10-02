@@ -5,6 +5,7 @@ Implementación de acciones ejecutadas por Function Calling de Gemini.
 import os
 import sys
 import re
+import shutil
 import ctypes
 import datetime
 import urllib.parse
@@ -68,9 +69,14 @@ def launch_application(app_name: str) -> str:
     Args:
         app_name: Nombre de la aplicación a ejecutar.
     """
-    name_lower = app_name.lower().strip()
+    raw_name = (app_name or "").strip()
+    # Sanitización estricta: Rechazar inyección de comandos en shell
+    if any(ch in raw_name for ch in ["&", "|", ";", ">", "<", "`", "$", "\n", "\r"]):
+        return f"Error de seguridad: Nombre de aplicación contiene caracteres inválidos: '{raw_name}'"
 
-    # Mapeo de aplicaciones comunes en Windows
+    name_lower = raw_name.lower().strip()
+
+    # Mapeo seguro de aplicaciones comunes en Windows
     app_mapping = {
         "spotify": "spotify:",
         "discord": "discord:",
@@ -106,20 +112,20 @@ def launch_application(app_name: str) -> str:
 
     try:
         if sys.platform == "win32":
-            if target.startswith("http://") or target.startswith("https://") or target.endswith(":"):
+            # Protocolos o URLs de Windows se abren de forma nativa y segura con os.startfile
+            if target.startswith(("http://", "https://")) or target.endswith(":"):
                 os.startfile(target)
-            else:
-                subprocess.Popen(target, shell=True)
+                return f"Aplicación o protocolo '{app_name}' iniciado correctamente."
+
+            # Ejecutar binario sin shell=True
+            executable = shutil.which(target) or target
+            subprocess.Popen([executable], shell=False)
         else:
-            subprocess.Popen([target])
+            executable = shutil.which(target) or target
+            subprocess.Popen([executable], shell=False)
         return f"Aplicación '{app_name}' iniciada correctamente."
     except Exception as e:
-        # Fallback genérico intentando ejecutar comando en shell
-        try:
-            subprocess.Popen(app_name, shell=True)
-            return f"Comando '{app_name}' enviado al sistema."
-        except Exception as e2:
-            return f"No se pudo iniciar la aplicación '{app_name}'. Detalle: {e2}"
+        return f"No se pudo iniciar la aplicación '{app_name}'. Detalle: {e}"
 
 
 def control_media(action: str) -> str:
