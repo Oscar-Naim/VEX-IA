@@ -124,9 +124,6 @@ class GeminiAgent:
     AVAILABLE_MODELS: List[str] = getattr(config, "AVAILABLE_MODELS", [
         "gemini-2.5-flash",
         "gemini-1.5-flash",
-        "gemini-flash-lite-latest",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
     ])
 
     def __init__(
@@ -426,7 +423,11 @@ class GeminiAgent:
                 mood_match = re.search(r"\[MOOD:\s*([A-Za-z_-]+)\]", reply, flags=re.IGNORECASE)
                 if mood_match:
                     explicit_mood = mood_match.group(1).upper()
-                    reply = re.sub(r"\[MOOD:\s*[A-Za-z_-]+\]\s*", "", reply, flags=re.IGNORECASE).strip()
+                # Limpiar TODOS los tags entre corchetes para evitar truncado en la UI
+                reply = re.sub(r"\[[A-Z_:][^\]\[]*\]", "", reply, flags=re.IGNORECASE).strip()
+                reply = re.sub(r"\s{2,}", " ", reply).strip()
+                if not reply:
+                    reply = "Orden táctica ejecutada con éxito."
 
                 prev_model = self.active_model
                 self.active_model = model_name
@@ -478,7 +479,10 @@ class GeminiAgent:
                         mood_match = re.search(r"\[MOOD:\s*([A-Za-z_-]+)\]", retry_text, flags=re.IGNORECASE)
                         if mood_match:
                             explicit_mood = mood_match.group(1).upper()
-                            retry_text = re.sub(r"\[MOOD:\s*[A-Za-z_-]+\]\s*", "", retry_text, flags=re.IGNORECASE).strip()
+                        retry_text = re.sub(r"\[[A-Z_:][^\]\[]*\]", "", retry_text, flags=re.IGNORECASE).strip()
+                        retry_text = re.sub(r"\s{2,}", " ", retry_text).strip()
+                        if not retry_text:
+                            retry_text = "Orden procesada con éxito."
 
                         expr, icon, dur = detect_emotion_and_icon(message, retry_text, explicit_mood=explicit_mood)
                         if self.on_emotion:
@@ -512,7 +516,10 @@ class GeminiAgent:
                         mood_match = re.search(r"\[MOOD:\s*([A-Za-z_-]+)\]", retry_text, flags=re.IGNORECASE)
                         if mood_match:
                             explicit_mood = mood_match.group(1).upper()
-                            retry_text = re.sub(r"\[MOOD:\s*[A-Za-z_-]+\]\s*", "", retry_text, flags=re.IGNORECASE).strip()
+                        retry_text = re.sub(r"\[[A-Z_:][^\]\[]*\]", "", retry_text, flags=re.IGNORECASE).strip()
+                        retry_text = re.sub(r"\s{2,}", " ", retry_text).strip()
+                        if not retry_text:
+                            retry_text = "Orden procesada con éxito."
 
                         expr, icon, dur = detect_emotion_and_icon(message, retry_text, explicit_mood=explicit_mood)
                         if self.on_emotion:

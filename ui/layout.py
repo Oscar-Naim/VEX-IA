@@ -1317,11 +1317,13 @@ class MainWindow(ctk.CTk):
         self._set_input_enabled(False)
 
         def task():
+            response = "VEX: No se pudo establecer conexión táctica con el modelo de IA. Sistemas en espera."
             try:
                 response = self.agent.send_message(prompt)
             except Exception as e:
                 response = f"Error al procesar orden táctica: {e}"
-            self.after(0, lambda: self._on_agent_response(response, from_voice=from_voice))
+            finally:
+                self.after(0, lambda: self._on_agent_response(response, from_voice=from_voice))
 
         threading.Thread(target=task, daemon=True).start()
 

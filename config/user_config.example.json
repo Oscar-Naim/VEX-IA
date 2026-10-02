@@ -3,5 +3,5 @@
     "user_name": "Oscar",
     "voice_id": "es-MX-JorgeNeural",
     "hands_free_mode": false,
-    "preferred_model": "gemini-flash-lite-latest"
+    "preferred_model": "gemini-2.5-flash"
 }
