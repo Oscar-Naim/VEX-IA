@@ -840,7 +840,7 @@ class MainWindow(ctk.CTk):
         self._chat_bottom_spacer.pack(fill="x", pady=0)
 
         self._render_chats_list()
-        self._initial_greeting()
+        self._initial_greeting(speak_audio=False)
 
     def _switch_chat_session(self, session_id: str):
         """Cambia a la sesión de chat seleccionada y reconstruye sus mensajes."""
@@ -1022,7 +1022,7 @@ class MainWindow(ctk.CTk):
 
     def _on_re_speak(self, text_to_speak: str):
         """Vocaliza de nuevo un mensaje al pulsar 'Escuchar de nuevo'."""
-        self.tts.speak(text_to_speak)
+        self.voice_mgr.speak(text_to_speak, from_voice=False)
 
     # ================= SINCRONIZACIÓN Y ESTADOS DEL VISOR ROBÓTICO =================
 
@@ -1158,7 +1158,7 @@ class MainWindow(ctk.CTk):
             self._add_message_card("system", f"Perfil actualizado para {user_name}. Núcleo sincronizado.")
         ApiKeyModal(self, on_save_callback=on_saved)
 
-    def _initial_greeting(self):
+    def _initial_greeting(self, speak_audio: bool = True):
         user_name = config.get_user_name()
         try:
             self.voice_mgr.start()
@@ -1177,7 +1177,11 @@ class MainWindow(ctk.CTk):
             self._add_message_card("agent", greeting)
             self._set_hud_state("idle")
             self.visor_canvas.set_expression("happy", duration=3.5)
-            self.tts.speak(greeting)
+            # Saludo inicial en modo anuncio (from_voice=False) para no abrir micrófono ni generar auto-órdenes
+            if speak_audio:
+                self.voice_mgr.speak(greeting, from_voice=False)
+            else:
+                self.voice_mgr.register_spoken_text(greeting, from_voice=False)
 
     # ================= ENTRADA DE COMANDOS Y 2 CAPAS =================
 
@@ -1186,9 +1190,9 @@ class MainWindow(ctk.CTk):
         if not query:
             return
         self.entry_prompt.delete(0, "end")
-        self._handle_user_prompt(query)
+        self._handle_user_prompt(query, from_voice=False)
 
-    def _handle_user_prompt(self, prompt: str):
+    def _handle_user_prompt(self, prompt: str, from_voice: bool = False):
         """Enrutamiento de 2 Capas: Capa 0 Local Zero-Token y Capa 1 Gemini."""
         user_name = config.get_user_name()
 
@@ -1204,7 +1208,7 @@ class MainWindow(ctk.CTk):
             farewell = f"Entendido, {user_name}. VEX entrando en modo reposo. Quedo atento a tu llamado."
             self._add_message_card("agent", farewell)
             self.voice_mgr.emergency_stop()
-            self.tts.speak(farewell)
+            self.voice_mgr.speak(farewell, from_voice=False)
             self.visor_canvas.set_expression("sleeping", duration=4.0)
             return
 
@@ -1227,7 +1231,7 @@ class MainWindow(ctk.CTk):
                 if hasattr(self, "floating_widget") and self.floating_widget:
                     self.floating_widget.set_expression(local_result.expression, duration=local_result.icon_duration)
 
-            self.tts.speak(local_result.spoken_response)
+            self.voice_mgr.speak(local_result.spoken_response, from_voice=from_voice)
 
             # Transición automática a Mini-VEX Widget si se abrió una aplicación, web o archivo
             if any(act in local_result.action_name for act in ["launch_application", "open_url", "search_youtube", "write_note"]):
@@ -1244,13 +1248,13 @@ class MainWindow(ctk.CTk):
 
         def task():
             response = self.agent.send_message(prompt)
-            self.after(0, lambda: self._on_agent_response(response))
+            self.after(0, lambda: self._on_agent_response(response, from_voice=from_voice))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _on_agent_response(self, response_text: str):
+    def _on_agent_response(self, response_text: str, from_voice: bool = False):
         self._add_message_card("agent", response_text)
-        self.tts.speak(response_text)
+        self.voice_mgr.speak(response_text, from_voice=from_voice)
 
     def _on_tool_executed(self, tool_name: str, args: dict, result: str):
         args_str = ", ".join(f"{k}='{v}'" for k, v in args.items())
@@ -1264,7 +1268,7 @@ class MainWindow(ctk.CTk):
     def _on_user_voice_command(self, recognized_text: str):
         """Recepción thread-safe de comandos de voz hacia la interfaz gráfica."""
         print(f"[UI] [VOZ] Procesando orden de voz en hilo principal: '{recognized_text}'")
-        self.after(0, lambda: self._handle_user_prompt(recognized_text))
+        self.after(0, lambda: self._handle_user_prompt(recognized_text, from_voice=True))
 
     def _on_wake_flash_triggered(self):
         """Dispara el destello y halo cian neón en el visor al detectar la palabra clave 'VEX'."""

@@ -5,11 +5,12 @@ STANDBY -> WAKE -> LISTENING -> THINKING -> SPEAKING -> FOLLOW_UP -> STANDBY
 Incluye síntesis de tonos cibernéticos (chimes de activación y descanso),
 ventana de seguimiento de 4 segundos y control del micrófono sin colisiones.
 """
+import re
 import math
 import struct
 import time
 import threading
-from typing import Callable, Optional
+from typing import Callable, Optional, List, Tuple
 from enum import Enum
 import os
 
@@ -123,6 +124,8 @@ class VoiceAssistantManager:
 
         self.current_state = AssistantState.STANDBY
         self.hands_free_mode = False
+        self.is_voice_session = False
+        self._recent_spoken_texts: List[Tuple[str, float]] = []
         self._follow_up_timer: Optional[threading.Timer] = None
 
         # 1. Motor de Palabra de Activación (100% Offline)
@@ -156,6 +159,7 @@ class VoiceAssistantManager:
     def start(self):
         """Inicia el sistema situando a VEX en modo Standby a la espera de su nombre."""
         self._cancel_follow_up_timer()
+        self.is_voice_session = False
         self.set_state(AssistantState.STANDBY)
         self.wake_detector.start()
 
@@ -167,11 +171,48 @@ class VoiceAssistantManager:
         except Exception as e:
             print(f"[VEX Manager] Error en callback de estado: {e}")
 
+    @staticmethod
+    def _clean_normalize(text: str) -> str:
+        """Normaliza texto eliminando acentos y signos para comparaciones acústicas."""
+        s = text.lower().strip()
+        replacements = [("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u")]
+        for a, b in replacements:
+            s = s.replace(a, b)
+        return re.sub(r"[^\w\s]", "", s).strip()
+
+    def _is_echo_of_speech(self, norm_rec: str, norm_spoken: str) -> bool:
+        """Detecta si lo reconocido por el micrófono es el eco de los altavoces de VEX."""
+        if not norm_rec or not norm_spoken:
+            return False
+        # Coincidencia directa de subcadena (ej. "darme una orden" dentro de "...para darme una orden")
+        if norm_rec in norm_spoken:
+            return True
+        # Coincidencia si la mayoría de las palabras reconocidas estaban en lo hablado por VEX
+        rec_words = [w for w in norm_rec.split() if len(w) > 2]
+        spoken_words = set(norm_spoken.split())
+        if rec_words and len(rec_words) <= 6:
+            matches = sum(1 for w in rec_words if w in spoken_words)
+            if matches / len(rec_words) >= 0.65:
+                return True
+        return False
+
+    def register_spoken_text(self, text: str, from_voice: bool = False):
+        """Registra el texto vocalizado por VEX para evitar eco acústico y definir el modo de sesión."""
+        if text and text.strip():
+            self._recent_spoken_texts.append((text.strip(), time.time()))
+        self.is_voice_session = from_voice
+
+    def speak(self, text: str, from_voice: bool = False):
+        """Vocaliza una respuesta asegurando el registro anti-eco y el origen de la orden."""
+        self.register_spoken_text(text, from_voice=from_voice)
+        self.tts.speak(text)
+
     # ================= 1. EVENTO WAKE WORD (¡VEX!) =================
 
     def _handle_wake_word_detected(self, keyword_heard: str):
         """Invocado en cuanto el detector offline escucha 'VEX' en la habitación."""
         self._cancel_follow_up_timer()
+        self.is_voice_session = True
 
         # 1. Notificar efecto de luz y sonido cibernético
         if self.on_wake_flash:
@@ -211,11 +252,24 @@ class VoiceAssistantManager:
 
         # Limpiar texto de invocaciones residuales al inicio
         clean = recognized_text.strip()
+        norm_rec = self._clean_normalize(clean)
 
-        # Transicionar a THINKING
+        # 1. Filtro Anti-Eco: Verificar si el micrófono captó los propios altavoces de VEX
+        now = time.time()
+        self._recent_spoken_texts = [(t, ts) for (t, ts) in self._recent_spoken_texts if now - ts < 15.0]
+
+        for (spoken_text, _) in self._recent_spoken_texts:
+            norm_spoken = self._clean_normalize(spoken_text)
+            if self._is_echo_of_speech(norm_rec, norm_spoken):
+                print(f"[VEX Manager] 🔇 Eco acústico descartado (VEX escuchó sus propios altavoces: '{clean}')")
+                self.is_voice_session = False
+                self._go_to_sleep()
+                return
+
+        # 2. Transicionar a THINKING
         self.set_state(AssistantState.THINKING)
 
-        # Notificar orden al manejador principal
+        # 3. Notificar orden al manejador principal
         try:
             self.on_user_command(clean)
         except Exception as e:
@@ -229,15 +283,12 @@ class VoiceAssistantManager:
             self.stt.start_listening_async()
             return
 
-        if self.current_state == AssistantState.FOLLOW_UP:
-            # En follow-up terminó la ventana de repreguntas: volver a dormir amablemente
-            self._go_to_sleep()
-        elif self.current_state == AssistantState.LISTENING:
-            # Si se despertó con 'VEX' pero no hubo orden, volver a dormir
-            self._go_to_sleep()
+        self.is_voice_session = False
+        self._go_to_sleep()
 
     def _on_stt_error(self, err_message: str):
         """Ocurrió un error en el reconocimiento de voz."""
+        self.is_voice_session = False
         if self.current_state in [AssistantState.LISTENING, AssistantState.FOLLOW_UP]:
             self._go_to_sleep()
 
@@ -249,9 +300,13 @@ class VoiceAssistantManager:
         self.set_state(AssistantState.SPEAKING)
 
     def _on_tts_end(self):
-        """VEX terminó de vocalizar la respuesta: iniciar ventana de Follow-up de 4s."""
-        # Abrir ventana de seguimiento de 4 segundos
-        self._enter_follow_up_window()
+        """VEX terminó de vocalizar la respuesta."""
+        # Solo abrir ventana de seguimiento si la sesión provino de voz o estamos en modo manos libres
+        if (self.is_voice_session or self.hands_free_mode) and self.current_state == AssistantState.SPEAKING:
+            self._enter_follow_up_window()
+        else:
+            self.is_voice_session = False
+            self._go_to_sleep()
 
     # ================= 4. VENTANA DE SEGUIMIENTO (FOLLOW-UP) Y REPOSO =================
 
@@ -260,7 +315,8 @@ class VoiceAssistantManager:
         self.set_state(AssistantState.FOLLOW_UP)
 
         def follow_up_task():
-            time.sleep(0.9)  # Pausa de transición acústica para evitar eco
+            # Pausa de transición acústica para que la reverberación de los altavoces cese por completo
+            time.sleep(1.2)
             if self.current_state == AssistantState.FOLLOW_UP and not self.tts.is_speaking:
                 self.stt.start_listening_async()
 
@@ -269,6 +325,7 @@ class VoiceAssistantManager:
     def _go_to_sleep(self):
         """Regresa ordenadamente al modo Standby emitiendo el tono de descanso."""
         self._cancel_follow_up_timer()
+        self.is_voice_session = False
         self.stt.stop_listening()
 
         # Reproducir sonido suave de descanso
@@ -296,6 +353,7 @@ class VoiceAssistantManager:
     def trigger_manual_listen(self):
         """Activa manualmente el micrófono al hacer clic en el botón '+ VOZ'."""
         self._cancel_follow_up_timer()
+        self.is_voice_session = True
         self.wake_detector.pause()
         self.tts.stop()
 
