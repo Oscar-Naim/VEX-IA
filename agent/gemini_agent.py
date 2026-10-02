@@ -24,6 +24,11 @@ from tools.system_tools import (
     system_info,
     write_note
 )
+from tools.media_controller import (
+    play_music,
+    play_spotify,
+    play_youtube
+)
 
 
 def safe_print(msg: str):
@@ -150,6 +155,8 @@ class GeminiAgent:
         self.max_history_messages: int = 4
 
         self.raw_tools = [
+            play_music,
+            play_spotify,
             search_youtube,
             open_url,
             launch_application,

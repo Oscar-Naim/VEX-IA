@@ -19,6 +19,11 @@ from tools.system_tools import (
     system_info,
     write_note
 )
+from tools.media_controller import (
+    play_music,
+    play_spotify,
+    play_youtube
+)
 
 
 @dataclass
@@ -48,6 +53,59 @@ class LocalIntentRouter:
         # Limpiar signos
         s = re.sub(r"[^\w\s]", "", s).strip()
         return s
+
+    @classmethod
+    def _extract_music_intent(cls, norm: str):
+        """
+        Analiza semánticamente si el prompt es una orden de búsqueda y reproducción de música
+        estilo Alexa (Spotify / YouTube) extrayendo la plataforma y la consulta limpia.
+        """
+        # Descartar comandos de transporte puro sin argumentos
+        transport_exact = {
+            "pausa", "pausar", "pausa la musica", "para la musica", "deten la musica", "stop", "silencio",
+            "continua", "continuar", "reanuda", "reanudar", "sigue la musica", "play", "dale play",
+            "pon play", "reproduce", "reproducir", "reproduce la musica", "reproducir musica",
+            "siguiente", "siguiente cancion", "pasa cancion", "cambia cancion", "next",
+            "anterior", "cancion anterior", "retrocede cancion", "prev"
+        }
+        if norm in transport_exact:
+            return None
+
+        platform = "spotify"
+        if any(k in norm for k in ["youtube", "you tube", "yt"]):
+            platform = "youtube"
+
+        # Limpiar comandos de apertura de aplicación
+        clean = norm
+        clean = re.sub(r"\b(abre|abren|abrir|inicia|iniciar)\s+(spotify|youtube)\s+(y\s+)?", "", clean).strip()
+
+        # Prefijos de ruido comunes a eliminar al inicio de la consulta
+        noise_prefixes = r"\b(a|la\s+cancion\s+de|la\s+cancion|las\s+canciones\s+de|el\s+album\s+de|el\s+album|el\s+disco\s+de|el\s+disco|el\s+tema\s+de|el\s+tema|musica\s+de|canciones\s+de|algo\s+de)\b"
+
+        patterns = [
+            # "pon en youtube/spotify <query>" / "busca en youtube/spotify <query>"
+            r"^(?:pon|reproduce|reproducir|toca|buscar?)\s+en\s+(?:spotify|youtube)\s+(.+)$",
+            # "reproduce/pon/toca <query>"
+            r"^(?:reproduce|reproducir|pon|ponme|toca|escuchar|quiero\s+escuchar)\s+(.+?)(?:\s+(?:en|por|de)\s+(?:spotify|youtube))?$",
+            # "busca y reproduce <query>"
+            r"^(?:busca\s+y\s+reproduce|buscar\s+y\s+reproducir)\s+(.+?)(?:\s+(?:en|por|de)\s+(?:spotify|youtube))?$"
+        ]
+
+        for pat in patterns:
+            m = re.match(pat, clean)
+            if m:
+                raw_query = m.group(1).strip()
+                # Limpiar prefijos de ruido al inicio
+                q = re.sub(f"^{noise_prefixes}\\s*", "", raw_query).strip()
+                # Limpiar 'su' / 'sus' conectores
+                q = re.sub(r"\b(su|sus)\s+", "", q).strip()
+                # Limpiar mención final de plataforma
+                q = re.sub(r"\b(en|por|de)\s+(spotify|youtube)$", "", q).strip()
+                q = re.sub(r"\s+", " ", q).strip()
+                if q and q not in ["musica", "cancion", "canciones", "algo", "album"]:
+                    return platform, q
+
+        return None
 
     @classmethod
     def route(cls, prompt: str, user_name: str = "Oscar") -> Optional[LocalRouteResult]:
@@ -171,7 +229,23 @@ class LocalIntentRouter:
                 icon_duration=4.0
             )
 
-        # ---------------- 1. CONTROL MULTIMEDIA Y VOLUMEN ----------------
+        # ---------------- 1. BÚSQUEDA Y REPRODUCCIÓN INTELIGENTE DE MÚSICA (ALEXA STYLE) ----------------
+        music_intent = cls._extract_music_intent(norm)
+        if music_intent:
+            platform, query = music_intent
+            res = play_music(platform=platform, query=query)
+            spoken = f"Reproduciendo '{query}' en {platform.capitalize()}, {user_name}."
+            return LocalRouteResult(
+                handled=True,
+                action_name=f"play_music:{platform}:'{query}'",
+                execution_result=res,
+                spoken_response=spoken,
+                expression="happy",
+                icon="music",
+                icon_duration=5.0
+            )
+
+        # ---------------- 2. CONTROL MULTIMEDIA Y VOLUMEN (TRANSPORTE PURO) ----------------
         # Subir Volumen
         if re.search(r"\b(sube|subir|aumenta|aumentar|mas)\s+(el\s+)?volumen\b", norm) or norm in ["volumen arriba", "mas volumen", "sube volumen"]:
             res = control_media("volume_up")
@@ -212,7 +286,7 @@ class LocalIntentRouter:
             )
 
         # Pausar Reproducción
-        if re.search(r"\b(pausa|pausar|pausa\s+la\s+musica|pausa\s+cancion|para\s+la\s+musica)\b", norm):
+        if re.search(r"\b(pausa|pausar|pausa\s+la\s+musica|pausa\s+cancion|para\s+la\s+musica|deten\s+la\s+musica|stop)\b", norm) and len(norm.split()) <= 4:
             res = control_media("play_pause")
             return LocalRouteResult(
                 handled=True,
@@ -224,8 +298,8 @@ class LocalIntentRouter:
                 icon_duration=2.5
             )
 
-        # Reanudar / Continuar
-        if re.search(r"\b(continua|continuar|reanuda|reanudar|reproduce|reproducir|play|dale\s+play)\b", norm):
+        # Reanudar / Continuar (Solo comandos puros de transporte sin consulta de artista/canción)
+        if re.search(r"^(continua|continuar|reanuda|reanudar|reproduce|reproducir|play|dale\s+play|pon\s+play|reproduce\s+la\s+musica|reproducir\s+musica)$", norm):
             res = control_media("play_pause")
             return LocalRouteResult(
                 handled=True,

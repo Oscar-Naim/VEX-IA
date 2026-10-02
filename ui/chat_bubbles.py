@@ -306,6 +306,19 @@ class ToolActionCard(ctk.CTkFrame):
         )
         time_str = timestamp or datetime.datetime.now().strftime("%H:%M:%S")
 
+        # Parseo inteligente de formato [✔ Plataforma: Detalle]
+        display_title = action_title
+        display_detail = detail.strip() if detail else ""
+        if display_detail.startswith("[✔") and "]" in display_detail:
+            inner_content = display_detail.strip("[]").replace("✔", "").strip()
+            if ":" in inner_content:
+                parts = inner_content.split(":", 1)
+                display_title = parts[0].strip()
+                display_detail = parts[1].strip()
+            else:
+                display_title = "SISTEMA"
+                display_detail = inner_content
+
         inner = ctk.CTkFrame(self, fg_color="transparent")
         inner.pack(fill="x", padx=12, pady=8)
 
@@ -319,7 +332,7 @@ class ToolActionCard(ctk.CTkFrame):
 
         lbl_title = ctk.CTkLabel(
             inner,
-            text=f"✔ {action_title}:",
+            text=f"✔ {display_title}:",
             font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
             text_color="#10b981"
         )
@@ -327,7 +340,7 @@ class ToolActionCard(ctk.CTkFrame):
 
         lbl_detail = ctk.CTkLabel(
             inner,
-            text=f"'{detail}'" if detail else "",
+            text=f"{display_detail}",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color="#a7f3d0"
         )

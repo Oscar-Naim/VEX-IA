@@ -36,5 +36,8 @@ requests>=2.31.0
 # Telemetría de Diagnóstico de Hardware y Control del Sistema
 psutil>=5.9.0
 
+# Automatización de Entrada y Atajos Multimedia (Spotify / Player)
+pyautogui>=0.9.54
+
 # Empaquetador Autónomo a Binario (.exe)
 pyinstaller>=6.0.0

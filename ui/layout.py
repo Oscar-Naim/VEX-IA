@@ -1230,10 +1230,11 @@ class MainWindow(ctk.CTk):
         local_result = LocalIntentRouter.route(prompt, user_name=user_name)
         if local_result and local_result.handled:
             self._add_message_card("user", prompt)
-            self._add_message_card(
-                "system",
-                f"Acción ejecutada: {local_result.action_name} -> {local_result.execution_result}"
-            )
+            if str(local_result.execution_result).startswith("[✔"):
+                sys_msg = str(local_result.execution_result)
+            else:
+                sys_msg = f"Acción ejecutada: {local_result.action_name} -> {local_result.execution_result}"
+            self._add_message_card("system", sys_msg)
             self._add_message_card("agent", local_result.spoken_response)
 
             if local_result.icon:
@@ -1247,8 +1248,8 @@ class MainWindow(ctk.CTk):
 
             self.voice_mgr.speak(local_result.spoken_response, from_voice=from_voice)
 
-            # Transición automática a Mini-VEX Widget si se abrió una aplicación, web o archivo
-            if any(act in local_result.action_name for act in ["launch_application", "open_url", "search_youtube", "write_note"]):
+            # Transición automática a Mini-VEX Widget si se abrió una aplicación, web, archivo o streaming musical
+            if any(act in local_result.action_name for act in ["launch_application", "open_url", "search_youtube", "write_note", "play_spotify", "play_youtube", "play_music"]):
                 self.after(550, self.show_floating_widget)
             return
 
@@ -1291,10 +1292,13 @@ class MainWindow(ctk.CTk):
         self.voice_mgr.speak(response_text, from_voice=from_voice)
 
     def _on_tool_executed(self, tool_name: str, args: dict, result: str):
-        args_str = ", ".join(f"{k}='{v}'" for k, v in args.items())
-        msg = f"Herramienta ejecutada: {tool_name}({args_str}) -> {result}"
+        if str(result).startswith("[✔"):
+            msg = str(result)
+        else:
+            args_str = ", ".join(f"{k}='{v}'" for k, v in args.items())
+            msg = f"Herramienta ejecutada: {tool_name}({args_str}) -> {result}"
         self.after(0, lambda: self._add_message_card("system", msg))
-        if tool_name in ["launch_application", "open_url", "search_youtube", "write_note"]:
+        if tool_name in ["launch_application", "open_url", "search_youtube", "write_note", "play_spotify", "play_youtube", "play_music"]:
             self.after(550, self.show_floating_widget)
 
     # ================= ORQUESTACIÓN DEL ASISTENTE Y WAKE WORD =================

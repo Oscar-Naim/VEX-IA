@@ -128,42 +128,12 @@ def launch_application(app_name: str) -> str:
         return f"No se pudo iniciar la aplicación '{app_name}'. Detalle: {e}"
 
 
-def control_media(action: str) -> str:
-    """
-    Controla el sistema multimedia y volumen del equipo.
-
-    Args:
-        action: Acción deseada ('volume_up', 'volume_down', 'mute', 'play_pause', 'next', 'prev').
-    """
-    act = action.lower().strip()
-
-    if sys.platform != "win32":
-        return f"Control de medios no soportado en plataforma {sys.platform}."
-
-    if "up" in act or "subir" in act:
-        # Subir 5 pasos (10%)
-        for _ in range(5):
-            _send_key_event(VK_VOLUME_UP)
-        return "Volumen incrementado."
-    elif "down" in act or "bajar" in act:
-        # Bajar 5 pasos (10%)
-        for _ in range(5):
-            _send_key_event(VK_VOLUME_DOWN)
-        return "Volumen disminuido."
-    elif "mute" in act or "silenciar" in act or "mutear" in act:
-        _send_key_event(VK_VOLUME_MUTE)
-        return "Estado de silencio alternado."
-    elif "play" in act or "pause" in act or "pausar" in act or "reproducir" in act:
-        _send_key_event(VK_MEDIA_PLAY_PAUSE)
-        return "Reproducción pausada o reanudada."
-    elif "next" in act or "siguiente" in act:
-        _send_key_event(VK_MEDIA_NEXT_TRACK)
-        return "Pista siguiente reproducida."
-    elif "prev" in act or "anterior" in act:
-        _send_key_event(VK_MEDIA_PREV_TRACK)
-        return "Pista anterior reproducida."
-    else:
-        return f"Acción de control multimedia '{action}' no reconocida. Opciones: volume_up, volume_down, mute, play_pause, next, prev."
+from tools.media_controller import (
+    play_spotify,
+    play_youtube,
+    play_music,
+    control_media
+)
 
 
 def system_info() -> str:
@@ -249,6 +219,9 @@ def write_note(content: str, title: str = "Nota_VEX") -> str:
 
 # Diccionario con el catálogo de herramientas mapeadas para Gemini
 AVAILABLE_TOOLS = {
+    "play_music": play_music,
+    "play_spotify": play_spotify,
+    "play_youtube": play_youtube,
     "search_youtube": search_youtube,
     "open_url": open_url,
     "launch_application": launch_application,
