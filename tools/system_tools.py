@@ -4,12 +4,14 @@ Implementación de acciones ejecutadas por Function Calling de Gemini.
 """
 import os
 import sys
+import re
 import ctypes
 import datetime
 import urllib.parse
 import webbrowser
 import subprocess
 import psutil
+
 
 # Virtual Key Codes para control multimedia nativo en Windows
 VK_VOLUME_MUTE = 0xAD        # 173
@@ -59,7 +61,9 @@ def open_url(url: str) -> str:
 
 def launch_application(app_name: str) -> str:
     """
-    Abre una aplicación instalada en la computadora (Spotify, Discord, Calculadora, Bloc de notas, Navegador, etc.).
+    Abre una aplicación instalada en la computadora (Spotify, Discord, Calculadora, Navegador, etc.).
+    IMPORTANTE: Si el usuario te pide abrir el Bloc de Notas y escribir, anotar o redactar texto,
+    NO uses esta función; usa la herramienta especializada 'write_note'.
 
     Args:
         app_name: Nombre de la aplicación a ejecutar.
@@ -187,6 +191,51 @@ def system_info() -> str:
     return reporte
 
 
+def write_note(content: str, title: str = "Nota_VEX") -> str:
+    """
+    Crea, redacta y abre una nota de texto en el Bloc de Notas (Notepad) de Windows con el contenido especificado.
+    Úsala SIEMPRE que el usuario te pida escribir, anotar, apuntar, redactar o guardar algo en el bloc de notas,
+    o cuando pida crear una nota rápida.
+
+    Args:
+        content: El texto o mensaje completo que debe redactarse y quedar escrito dentro de la nota.
+        title: Título o nombre temático del archivo de nota (opcional, ej. 'Nota_Oscar', 'Lista_Compras').
+    """
+    clean_content = (content or "").strip()
+    if not clean_content:
+        clean_content = "Nota creada por el asistente táctico VEX // LYAXIS labs™"
+
+    try:
+        user_profile = os.environ.get("USERPROFILE", "")
+        onedrive_desktop = os.path.join(user_profile, "OneDrive", "Desktop")
+        std_desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+
+        if os.path.isdir(onedrive_desktop):
+            desktop_path = onedrive_desktop
+        elif os.path.isdir(std_desktop):
+            desktop_path = std_desktop
+        else:
+            desktop_path = os.getcwd()
+
+        clean_title = re.sub(r'[\\/*?:"<>|]', "", title or "Nota_VEX").strip().replace(" ", "_")
+        if not clean_title:
+            clean_title = "Nota_VEX"
+
+        file_path = os.path.join(desktop_path, f"{clean_title}.txt")
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(clean_content + "\n")
+
+        if sys.platform == "win32":
+            subprocess.Popen(["notepad.exe", file_path])
+        else:
+            subprocess.Popen(["xdg-open", file_path])
+
+        return f"Nota '{clean_title}.txt' redactada con éxito y abierta en el Bloc de notas."
+    except Exception as e:
+        return f"Error al redactar y abrir la nota: {e}"
+
+
 # Diccionario con el catálogo de herramientas mapeadas para Gemini
 AVAILABLE_TOOLS = {
     "search_youtube": search_youtube,
@@ -194,4 +243,6 @@ AVAILABLE_TOOLS = {
     "launch_application": launch_application,
     "control_media": control_media,
     "system_info": system_info,
+    "write_note": write_note,
 }
+

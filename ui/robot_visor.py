@@ -731,6 +731,8 @@ class RobotVisorCanvas(tk.Canvas):
             self._draw_pixel_battery(cx, cy, scale, t)
         elif icon_name == "calc":
             self._draw_pixel_calc(cx, cy, scale, t)
+        elif icon_name in ["notes", "notepad", "edit"]:
+            self._draw_pixel_notes(cx, cy, scale, t)
         else:
             self._draw_pixel_music(cx, cy, scale, t)
 
@@ -845,3 +847,36 @@ class RobotVisorCanvas(tk.Canvas):
         self.create_rectangle(cx - 20 * scale, cy - 14 * scale, cx + 20 * scale, cy - 4 * scale, fill="#042033", outline=self.c_cyan_glow)
         font_sz = int(max(7, 9 * scale))
         self.create_text(cx, cy + 8 * scale, text="+ - =", font=("Consolas", font_sz, "bold"), fill=self.c_cyan_core)
+
+    def _draw_pixel_notes(self, cx: float, cy: float, scale: float, t: float):
+        """Icono animado de libreta / bloc de notas digital 📝."""
+        bob = math.sin(t * 4.0) * (2.0 * scale)
+        base_x = cx
+        base_y = cy + bob - 2.0 * scale
+
+        bw = 42.0 * scale
+        bh = 50.0 * scale
+        bx1 = base_x - bw / 2.0
+        by1 = base_y - bh / 2.0
+        bx2 = base_x + bw / 2.0
+        by2 = base_y + bh / 2.0
+
+        # Fondo del bloc de notas
+        self._draw_rounded_capsule(bx1, by1, bx2, by2, 5 * scale, fill="#071526", outline=self.c_cyan_bright, width=1.5)
+
+        # Barra superior de la nota
+        self.create_rectangle(bx1 + 2, by1 + 2, bx2 - 2, by1 + 8 * scale, fill=self.c_cyan_glow, outline="")
+
+        # Líneas de texto holográficas
+        line_colors = [self.c_white, self.c_cyan_core, self.c_cyan_core]
+        for i in range(3):
+            ly = by1 + (16 + i * 8) * scale
+            lw = (28 - i * 4) * scale
+            self.create_line(bx1 + 7 * scale, ly, bx1 + 7 * scale + lw, ly, fill=line_colors[i], width=max(1.5, 2.0 * scale), capstyle="round")
+
+        # Lápiz / cursor táctico brillante en la esquina
+        px = bx2 - 3 * scale
+        py = by2 - 4 * scale
+        self.create_line(px - 10 * scale, py - 10 * scale, px, py, fill="#fde047", width=max(2.0, 3.0 * scale), capstyle="round")
+        self.create_oval(px - 2 * scale, py - 2 * scale, px + 2 * scale, py + 2 * scale, fill="#ffffff", outline="")
+

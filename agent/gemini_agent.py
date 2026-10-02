@@ -20,7 +20,8 @@ from tools.system_tools import (
     open_url,
     launch_application,
     control_media,
-    system_info
+    system_info,
+    write_note
 )
 
 
@@ -54,6 +55,9 @@ def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[s
         return "idle", "battery", 3.5
     if any(k in text for k in ["calcula", "calcular", "matematica", "suma", "resta", "multiplica", "ecuacion", "cuenta"]):
         return "happy", "calc", 3.5
+    if any(k in text for k in ["nota", "notas", "bloc de notas", "escribe", "anota", "apunta", "redacta"]):
+        return "happy", "notes", 3.5
+
 
     # 2. Expresiones faciales
     if any(k in text for k in ["cool", "gafas", "lentes", "facha", "fachero", "chido", "crack", "estilo", "thug life"]):
@@ -107,7 +111,8 @@ class GeminiAgent:
             open_url,
             launch_application,
             control_media,
-            system_info
+            system_info,
+            write_note
         ]
         self._initialize_client()
 

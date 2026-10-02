@@ -16,7 +16,8 @@ from tools.system_tools import (
     open_url,
     launch_application,
     control_media,
-    system_info
+    system_info,
+    write_note
 )
 
 
@@ -232,7 +233,7 @@ class LocalIntentRouter:
             )
 
         # Abrir Spotify
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+spotify\b", norm) or norm in ["spotify", "musica"]:
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+spotify\b", norm) or norm in ["spotify", "musica"]:
             res = launch_application("spotify")
             return LocalRouteResult(
                 handled=True,
@@ -245,7 +246,7 @@ class LocalIntentRouter:
             )
 
         # Abrir Calculadora
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+calculadora\b", norm) or norm == "calculadora":
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+calculadora\b", norm) or norm == "calculadora":
             res = launch_application("calc.exe")
             return LocalRouteResult(
                 handled=True,
@@ -257,21 +258,121 @@ class LocalIntentRouter:
                 icon_duration=3.0
             )
 
-        # Abrir Bloc de Notas
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+(el\s+)?(bloc\s+de\s+notas|notas)\b", norm) or norm in ["bloc de notas", "notas"]:
-            res = launch_application("notepad.exe")
+        # ---------------- GESTIÓN Y ESCRITURA EN BLOC DE NOTAS ----------------
+        # Detección de órdenes de escritura: "abre notas y escribe...", "abren notas y escribe...",
+        # "escribe en notas...", "anota en el bloc de notas...", "crea una nota...", "toma nota de..."
+        is_write_cmd = False
+        raw_note_text = ""
+
+        # Patrón 1: "abre / abren notas y escribe / anota / pon [texto]"
+        m_note1 = re.search(
+            r"\b(?:abre|abren|abrir|inicia|iniciar)\s+(?:el\s+)?(?:bloc\s+de\s+notas|notas)\s+y\s+(?:escribe|escribir|anota|anotar|redacta|redactar|pon|poner|apunta|apuntar|guarda|guardar)(?:\s+(.+))?$",
+            norm
+        )
+        if m_note1:
+            is_write_cmd = True
+            raw_note_text = (m_note1.group(1) or "").strip()
+
+        # Patrón 2: "escribe / anota / pon en notas / en el bloc de notas [texto]"
+        if not is_write_cmd:
+            m_note2 = re.search(
+                r"\b(?:escribe|escribir|anota|anotar|redacta|redactar|pon|poner|apunta|apuntar|guarda|guardar)\s+(?:en\s+)?(?:el\s+)?(?:bloc\s+de\s+notas|notas)(?:\s+(.+))?$",
+                norm
+            )
+            if m_note2:
+                is_write_cmd = True
+                raw_note_text = (m_note2.group(1) or "").strip()
+
+        # Patrón 3: "crea una nota / toma nota / haz una nota [que diga / con / de] [texto]"
+        if not is_write_cmd:
+            m_note3 = re.search(
+                r"\b(?:crea\s+una\s+nota|toma\s+nota|haz\s+una\s+nota|hazme\s+una\s+nota|nueva\s+nota)\s*(?:que\s+diga\s+|de\s+|con\s+|que\s+)?(.+)?$",
+                norm
+            )
+            if m_note3:
+                is_write_cmd = True
+                raw_note_text = (m_note3.group(1) or "").strip()
+
+        if is_write_cmd:
+            # Caso A: El usuario pide escribir "lo que tú quieras", "lo que sea", etc. o no dio texto
+            generic_phrases = [
+                "", "lo que tu quieras", "lo que quieras", "lo que gustes",
+                "lo que sea", "algo", "un saludo", "un mensaje", "lo que quieras tu",
+                "lo que te de la gana"
+            ]
+            if raw_note_text in generic_phrases:
+                now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                note_content = (
+                    f"=====================================================\n"
+                    f"LYAXIS labs™ // REGISTRO TÁCTICO DE VEX\n"
+                    f"Operador: {user_name}\n"
+                    f"Fecha y Hora: {now_str}\n"
+                    f"Estado del Sistema: 100% Nominal // Conexión activa\n"
+                    f"=====================================================\n\n"
+                    f"Hola {user_name},\n\n"
+                    f"Confirmación de enlace neuronal establecida con éxito.\n"
+                    f"Todos los subsistemas tácticos, reconocimiento de voz\n"
+                    f"y herramientas de escritorio operan a máxima capacidad.\n\n"
+                    f"\"La tecnología no reemplaza la creatividad humana;\n"
+                    f" amplifica el poder para construir el futuro.\"\n\n"
+                    f"A la orden para tu siguiente instrucción.\n"
+                    f"-- VEX Tactical AI"
+                )
+                spoken = f"He abierto el Bloc de notas y redacté un registro táctico para ti, {user_name}."
+            else:
+                # Caso B: El usuario dictó texto específico
+                clean_text = raw_note_text
+                if clean_text.startswith("que "):
+                    clean_text = clean_text[4:].strip()
+                elif clean_text.startswith("de que "):
+                    clean_text = clean_text[7:].strip()
+                elif clean_text.startswith("diciendo que "):
+                    clean_text = clean_text[13:].strip()
+
+                if clean_text:
+                    clean_text = clean_text[0].upper() + clean_text[1:]
+                else:
+                    clean_text = "Nota rápida guardada."
+
+                now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                note_content = (
+                    f"{clean_text}\n\n"
+                    f"----------------------------------------\n"
+                    f"Nota guardada por VEX // LYAXIS labs™\n"
+                    f"Fecha: {now_str}\n"
+                )
+                spoken = f"He anotado '{clean_text}' en tu Bloc de notas, {user_name}."
+
+            res = write_note(note_content, title=f"Nota_{user_name}")
             return LocalRouteResult(
                 handled=True,
-                action_name="launch_application:notepad",
+                action_name="write_note:notepad",
                 execution_result=res,
-                spoken_response="Abriendo Bloc de notas.",
+                spoken_response=spoken,
                 expression="happy",
-                icon=None,
-                icon_duration=2.5
+                icon="notes",
+                icon_duration=3.5
             )
 
+        # Abrir Bloc de Notas (sólo iniciar la aplicación vacía, sin verbos de escritura)
+        if (
+            re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(el\s+)?(bloc\s+de\s+notas|notas)\b", norm)
+            or norm in ["bloc de notas", "notas"]
+        ):
+            if not re.search(r"\b(escribe|escribir|anota|anotar|redacta|redactar|pon|poner|apunta|apuntar)\b", norm):
+                res = launch_application("notepad.exe")
+                return LocalRouteResult(
+                    handled=True,
+                    action_name="launch_application:notepad",
+                    execution_result=res,
+                    spoken_response=f"Abriendo Bloc de notas, {user_name}.",
+                    expression="happy",
+                    icon="notes",
+                    icon_duration=2.5
+                )
+
         # Abrir Navegador
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+(el\s+)?(navegador|google|chrome)\b", norm):
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(el\s+)?(navegador|google|chrome)\b", norm):
             res = launch_application("chrome")
             return LocalRouteResult(
                 handled=True,
@@ -284,7 +385,7 @@ class LocalIntentRouter:
             )
 
         # Abrir Discord
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+discord\b", norm) or norm == "discord":
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+discord\b", norm) or norm == "discord":
             res = launch_application("discord")
             return LocalRouteResult(
                 handled=True,
@@ -297,7 +398,7 @@ class LocalIntentRouter:
             )
 
         # Abrir VS Code
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+(visual\s+studio|vscode|code)\b", norm):
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(visual\s+studio|vscode|code)\b", norm):
             res = launch_application("code")
             return LocalRouteResult(
                 handled=True,
@@ -310,7 +411,7 @@ class LocalIntentRouter:
             )
 
         # Abrir Administrador de Tareas
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+administrador\s+de\s+tareas\b", norm):
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+administrador\s+de\s+tareas\b", norm):
             res = launch_application("taskmgr.exe")
             return LocalRouteResult(
                 handled=True,
@@ -323,7 +424,7 @@ class LocalIntentRouter:
             )
 
         # Abrir Configuración
-        if re.search(r"\b(abre|abrir|inicia|iniciar)\s+(configuracion|ajustes)\b", norm):
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(configuracion|ajustes)\b", norm):
             res = launch_application("ms-settings:")
             return LocalRouteResult(
                 handled=True,
