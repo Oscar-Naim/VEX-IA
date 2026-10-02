@@ -99,6 +99,54 @@ class LocalIntentRouter:
                 icon_duration=4.5
             )
 
+        # Modo Triste / Melancólico
+        if re.search(r"\b(ponte\s+triste|modo\s+triste|estas\s+triste|hazte\s+el\s+triste|llora|llorar|ponte\s+a\s+llorar)\b", norm):
+            return LocalRouteResult(
+                handled=True,
+                action_name="visor:sad",
+                execution_result="Expresión melancólica activada en visor",
+                spoken_response=f"snif... De acuerdo, {user_name}, activando modo melancólico... Aunque sinceramente prefiero verte sonreír.",
+                expression="sad",
+                icon=None,
+                icon_duration=6.0
+            )
+
+        # Anímate / Sonríe / Modo Feliz
+        if re.search(r"\b(animate|sonrie|ponte\s+feliz|alegrate|modo\s+feliz|ponte\s+contento|alegria)\b", norm):
+            return LocalRouteResult(
+                handled=True,
+                action_name="visor:happy",
+                execution_result="Expresión alegre activada en visor",
+                spoken_response=f"¡Sistemas al cien por ciento de energía positiva, {user_name}! Sonrisa táctica encendida.",
+                expression="happy",
+                icon=None,
+                icon_duration=5.0
+            )
+
+        # Expresión de Afecto / Corazones
+        if re.search(r"\b(te\s+quiero|te\s+amo|te\s+aprecio|eres\s+mi\s+amigo|buen\s+amigo|ojos\s+de\s+corazon|corazones)\b", norm):
+            return LocalRouteResult(
+                handled=True,
+                action_name="visor:love",
+                execution_result="Expresión de afecto proyectada en visor",
+                spoken_response=f"¡Y yo a ti, {user_name}! Eres el mejor operador y compañero que un asistente táctico podría tener.",
+                expression="love",
+                icon=None,
+                icon_duration=6.0
+            )
+
+        # ¿Cómo estás? / Estado de ánimo
+        if re.search(r"\b(como\s+estas|como\s+te\s+va|como\s+andas|que\s+tal\s+estas|como\s+te\s+sientes)\b", norm) and len(norm.split()) <= 5:
+            return LocalRouteResult(
+                handled=True,
+                action_name="social:status",
+                execution_result="Estado emocional compartido",
+                spoken_response=f"¡Excelente y al máximo rendimiento, {user_name}! Calibrado, contento y listo para acompañarte en cualquier misión hoy.",
+                expression="happy",
+                icon=None,
+                icon_duration=4.0
+            )
+
         # Saludo amistoso directo
         if re.search(r"^(hola|buenos\s+dias|buenas\s+tardes|buenas\s+noches|que\s+tal|saludos)\b", norm) and len(norm.split()) <= 4:
             return LocalRouteResult(

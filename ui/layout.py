@@ -522,7 +522,7 @@ class MainWindow(ctk.CTk):
         # 1. HEADER SUPERIOR TÁCTICO
         self.frame_header = ctk.CTkFrame(
             self.frame_main_area,
-            height=92,
+            height=112,
             fg_color=BG_HEADER,
             corner_radius=0,
             border_width=1,
@@ -533,16 +533,29 @@ class MainWindow(ctk.CTk):
 
         # Lado izquierdo del header: Visor Robótico animado y títulos
         header_left = ctk.CTkFrame(self.frame_header, fg_color="transparent")
-        header_left.pack(side="left", fill="y", padx=12, pady=6)
+        header_left.pack(side="left", fill="y", padx=14, pady=8)
 
-        # Visor de Robot Expresivo compacto integrado en el header
-        self.visor_canvas = RobotVisorCanvas(header_left, width=220, height=80)
-        self.visor_canvas.pack(side="left", padx=(0, 10), pady=0)
+        # Contenedor estilizado tipo cápsula táctica con brillo neón cian
+        self.visor_card = ctk.CTkFrame(
+            header_left,
+            width=274,
+            height=94,
+            fg_color="#03050a",
+            corner_radius=16,
+            border_width=1.5,
+            border_color=ACCENT_CYAN
+        )
+        self.visor_card.pack(side="left", padx=(0, 14), pady=0)
+        self.visor_card.pack_propagate(False)
+
+        # Visor de Robot Expresivo prominente y centrado en la tarjeta
+        self.visor_canvas = RobotVisorCanvas(self.visor_card, width=268, height=88)
+        self.visor_canvas.pack(fill="both", expand=True, padx=2, pady=2)
         self.avatar_canvas = self.visor_canvas  # Alias para compatibilidad
 
         # Bloque de título y rol
         title_box = ctk.CTkFrame(header_left, fg_color="transparent")
-        title_box.pack(side="left", fill="y", pady=14)
+        title_box.pack(side="left", fill="y", pady=18)
 
         self.lbl_app_title = ctk.CTkLabel(
             title_box,
@@ -562,7 +575,7 @@ class MainWindow(ctk.CTk):
 
         # Lado derecho del header: Controles tácticos
         header_right = ctk.CTkFrame(self.frame_header, fg_color="transparent")
-        header_right.pack(side="right", fill="y", padx=14, pady=18)
+        header_right.pack(side="right", fill="y", padx=14, pady=24)
 
         # Botón BYOK
         self.btn_byok = ctk.CTkButton(
@@ -1120,10 +1133,11 @@ class MainWindow(ctk.CTk):
     def _on_agent_emotion(self, expr_name: str, icon_name: Optional[str], duration: float):
         """Callback thread-safe para reflejar expresiones e iconos en el visor principal y widget flotante."""
         def apply():
-            if expr_name and expr_name != "idle":
-                self.visor_canvas.set_expression(expr_name, duration)
+            if expr_name:
+                dur_arg = duration if duration > 0 else None
+                self.visor_canvas.set_expression(expr_name, dur_arg)
                 if hasattr(self, "floating_widget") and self.floating_widget:
-                    self.floating_widget.set_expression(expr_name, duration)
+                    self.floating_widget.set_expression(expr_name, dur_arg)
             if icon_name:
                 self.visor_canvas.show_icon(icon_name, duration)
                 if hasattr(self, "floating_widget") and self.floating_widget:

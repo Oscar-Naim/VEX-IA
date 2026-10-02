@@ -33,13 +33,47 @@ def safe_print(msg: str):
         print(msg.encode("ascii", errors="replace").decode("ascii"))
 
 
-def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[str], float]:
+def detect_emotion_and_icon(
+    prompt: str,
+    response: str,
+    explicit_mood: Optional[str] = None
+) -> Tuple[str, Optional[str], float]:
     """
-    Analiza el prompt del usuario y la respuesta de Gemini para determinar
-    la emoción visual y los iconos contextuales a proyectar en el visor EMO / Vector.
+    Analiza la etiqueta explícita de ánimo [MOOD: ...], el prompt del usuario y la respuesta de Gemini
+    para determinar la expresión visual y los iconos contextuales a proyectar en el visor EMO / Vector.
 
     Retorna: (expression_name, icon_name, icon_duration)
     """
+    # 0. Mapeo prioritario si el modelo devolvió una etiqueta estructurada [MOOD: ...]
+    if explicit_mood:
+        mood_clean = explicit_mood.strip().upper()
+        mood_map = {
+            "HAPPY": ("happy", None, 5.0),
+            "SAD": ("sad", None, 6.0),
+            "COOL": ("cool_shades", None, 6.0),
+            "LOVE": ("love", None, 6.0),
+            "THINKING": ("thinking", None, 5.0),
+            "SURPRISE": ("surprise", None, 4.0),
+            "SLEEPING": ("sleeping", None, 6.0),
+            "WINK": ("wink", None, 4.0),
+            "IDLE": ("idle", None, 0.0),
+        }
+        if mood_clean in mood_map:
+            expr, icon, dur = mood_map[mood_clean]
+            # Verificar si además se menciona algún icono contextual (música, búsqueda, etc.)
+            text = (prompt + " " + response).lower()
+            if any(k in text for k in ["helado", "ice cream", "nieve", "paleta"]):
+                return expr, "ice_cream", 4.0
+            if any(k in text for k in ["musica", "música", "cancion", "canción", "spotify", "youtube"]):
+                return expr, "music", 3.5
+            if any(k in text for k in ["busca", "buscar", "investiga", "google"]):
+                return expr, "search", 3.5
+            if any(k in text for k in ["hora", "tiempo", "reloj"]):
+                return expr, "clock", 3.5
+            if any(k in text for k in ["calcula", "cuenta"]):
+                return expr, "calc", 3.5
+            return expr, icon, dur
+
     text = (prompt + " " + response).lower()
 
     # 1. Proyecciones contextuales de iconos
@@ -58,8 +92,11 @@ def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[s
     if any(k in text for k in ["nota", "notas", "bloc de notas", "escribe", "anota", "apunta", "redacta"]):
         return "happy", "notes", 3.5
 
-
     # 2. Expresiones faciales e iconos de alerta
+    if any(k in text for k in ["triste", "tristeza", "llora", "llorar", "pena", "melancolico", "melancólico", "desanimado", "snif", "bajon", "bajón"]):
+        return "sad", None, 6.0
+    if any(k in text for k in ["te quiero", "te amo", "te aprecio", "cariño", "amor", "corazon", "corazón", "abrazo", "lindo"]):
+        return "love", None, 6.0
     if any(k in text for k in ["error", "fallo", "falla", "alerta", "advertencia", "peligro", "cuidado"]):
         return "surprise", "alert", 3.5
     if any(k in text for k in ["cool", "gafas", "lentes", "facha", "fachero", "chido", "crack", "estilo", "thug life"]):
@@ -336,6 +373,13 @@ class GeminiAgent:
                 if not reply:
                     reply = "Orden táctica ejecutada con éxito."
 
+                # Extraer etiqueta de ánimo si está presente (ej. [MOOD: HAPPY] o [MOOD: SAD])
+                explicit_mood = None
+                mood_match = re.search(r"\[MOOD:\s*([A-Za-z_-]+)\]", reply, flags=re.IGNORECASE)
+                if mood_match:
+                    explicit_mood = mood_match.group(1).upper()
+                    reply = re.sub(r"\[MOOD:\s*[A-Za-z_-]+\]\s*", "", reply, flags=re.IGNORECASE).strip()
+
                 prev_model = self.active_model
                 self.active_model = model_name
                 # Post-recorte de historial tras respuesta
@@ -348,7 +392,7 @@ class GeminiAgent:
                         pass
 
                 # 5. Detección de emoción / icono contextual
-                expr, icon, dur = detect_emotion_and_icon(message, reply)
+                expr, icon, dur = detect_emotion_and_icon(message, reply, explicit_mood=explicit_mood)
                 if self.on_emotion:
                     try:
                         self.on_emotion(expr, icon, dur)
@@ -381,7 +425,14 @@ class GeminiAgent:
                                 pass
                         if not retry_text:
                             retry_text = "Orden procesada con éxito."
-                        expr, icon, dur = detect_emotion_and_icon(message, retry_text)
+
+                        explicit_mood = None
+                        mood_match = re.search(r"\[MOOD:\s*([A-Za-z_-]+)\]", retry_text, flags=re.IGNORECASE)
+                        if mood_match:
+                            explicit_mood = mood_match.group(1).upper()
+                            retry_text = re.sub(r"\[MOOD:\s*[A-Za-z_-]+\]\s*", "", retry_text, flags=re.IGNORECASE).strip()
+
+                        expr, icon, dur = detect_emotion_and_icon(message, retry_text, explicit_mood=explicit_mood)
                         if self.on_emotion:
                             try:
                                 self.on_emotion(expr, icon, dur)
@@ -408,7 +459,14 @@ class GeminiAgent:
                                 pass
                         if not retry_text:
                             retry_text = "Orden procesada con éxito."
-                        expr, icon, dur = detect_emotion_and_icon(message, retry_text)
+
+                        explicit_mood = None
+                        mood_match = re.search(r"\[MOOD:\s*([A-Za-z_-]+)\]", retry_text, flags=re.IGNORECASE)
+                        if mood_match:
+                            explicit_mood = mood_match.group(1).upper()
+                            retry_text = re.sub(r"\[MOOD:\s*[A-Za-z_-]+\]\s*", "", retry_text, flags=re.IGNORECASE).strip()
+
+                        expr, icon, dur = detect_emotion_and_icon(message, retry_text, explicit_mood=explicit_mood)
                         if self.on_emotion:
                             try:
                                 self.on_emotion(expr, icon, dur)

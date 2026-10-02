@@ -172,20 +172,20 @@ class RobotVisorCanvas(tk.Canvas):
         w, h = float(self.width), float(self.height)
         cx, cy = w / 2.0, h / 2.0
 
-        # Factor de escala adaptativo según si es visor de cabecera (< 320px) o pantalla completa
-        if w < 320:
-            visor_w = max(w - 6.0, 90.0)
-            visor_h = max(h - 6.0, 50.0)
-            scale = max(0.55, min(visor_w / 440.0, visor_h / 190.0) * 1.85)
-            r_outer = min(24.0, visor_h / 2.0)
-            r_inner = max(10.0, r_outer - 4.0)
+        # Factor de escala adaptativo según si es visor de cabecera (< 340px) o pantalla completa
+        if w < 340:
+            visor_w = max(w - 4.0, 90.0)
+            visor_h = max(h - 4.0, 50.0)
+            scale = max(0.80, min(visor_w / 330.0, visor_h / 105.0) * 1.48)
+            r_outer = min(28.0, visor_h / 2.0)
+            r_inner = max(11.0, r_outer - 3.5)
             compact = True
         else:
-            visor_w = min(w - 36.0, 560.0)
+            visor_w = min(w - 24.0, 600.0)
             visor_w = max(visor_w, 280.0)
-            visor_h = min(h - 24.0, 220.0)
+            visor_h = min(h - 16.0, 240.0)
             visor_h = max(visor_h, 150.0)
-            scale = 1.0
+            scale = 1.2
             r_outer = 44.0
             r_inner = 36.0
             compact = False
@@ -284,12 +284,12 @@ class RobotVisorCanvas(tk.Canvas):
             fill="#030408", outline=""
         )
 
-        # Capa 1: Carcasa exterior pulida metálica
+        # Capa 1: Carcasa exterior pulida metálica con borde glow cyberpunk
         self._draw_rounded_capsule(
             vx1 - 2, vy1 - 2,
             vx2 + 2, vy2 + 2,
             r_outer,
-            fill=self.c_bezel_outer, outline="#2b384e", width=1.0
+            fill="#060a14", outline="#2563ff", width=1.5
         )
 
         # Capa 2: Pantalla OLED Negro Puro (#000000)
@@ -299,12 +299,15 @@ class RobotVisorCanvas(tk.Canvas):
             fill=self.c_oled_black, outline=""
         )
 
-        # Borde sutil delimitador
-        neon_border_color = self.c_cyan_dim if self.state != "thinking" else "#451a03"
+        # Borde sutil delimitador con glow cian neón táctico
+        pulse_border = 0.5 + 0.5 * math.sin(t * 3.0)
+        neon_border_color = self.c_cyan_bright if pulse_border > 0.35 else self.c_cyan_dim
+        if self.state == "thinking":
+            neon_border_color = self.c_amber_glow
         self._draw_rounded_capsule(
             vx1 + 1, vy1 + 1, vx2 - 1, vy2 - 1,
             r_inner - 1,
-            fill="", outline=neon_border_color, width=1.0
+            fill="", outline=neon_border_color, width=1.2
         )
 
         # Partículas de polvo si hay espacio
@@ -437,7 +440,22 @@ class RobotVisorCanvas(tk.Canvas):
             self._draw_straight_mouth(cx, mouth_y, scale)
             return
 
-        # ---------------- CASO 8: NORMAL / IDLE (OJOS GRANDES AMIGABLES) ----------------
+        # ---------------- CASO 8: MODO TRISTE / MELANCÓLICO ----------------
+        if expr == "sad":
+            self._draw_sad_eye(left_eye_x, eye_y, scale, t, is_left=True)
+            self._draw_sad_eye(right_eye_x, eye_y, scale, t, is_left=False)
+            self._draw_sad_mouth(cx, mouth_y, scale, t)
+            return
+
+        # ---------------- CASO 9: AFECTO / AMISTAD (CORAZONES ❤️) ----------------
+        if expr in ["love", "heart", "affection"]:
+            self._draw_heart_eye(left_eye_x, eye_y, scale, t)
+            self._draw_heart_eye(right_eye_x, eye_y, scale, t)
+            self._draw_cheeks(left_eye_x, right_eye_x, eye_y + 18.0 * scale, scale, t)
+            self._draw_happy_mouth(cx, mouth_y, scale, t)
+            return
+
+        # ---------------- CASO 10: NORMAL / IDLE (OJOS GRANDES AMIGABLES) ----------------
         self._draw_blocky_eye(left_eye_x, eye_y, scale, t, blink)
         self._draw_blocky_eye(right_eye_x, eye_y, scale, t, blink)
         self._draw_speaking_or_idle_mouth(cx, mouth_y, scale, t)
@@ -446,8 +464,8 @@ class RobotVisorCanvas(tk.Canvas):
 
     def _draw_blocky_eye(self, ex: float, ey: float, scale: float, t: float, blink: float):
         """Ojo digital grande y expresivo estilo EMO/Vector con brillo difuminado."""
-        ew = 48.0 * scale
-        eh = 58.0 * scale
+        ew = 54.0 * scale
+        eh = 66.0 * scale
 
         scale_y = max(0.08, 1.0 - (blink * 0.92))
         curr_h = eh * scale_y
@@ -457,10 +475,10 @@ class RobotVisorCanvas(tk.Canvas):
         x2 = ex + ew / 2.0
         y2 = ey + curr_h / 2.0
 
-        corner_r = min(16.0 * scale, curr_h / 2.0)
+        corner_r = min(18.0 * scale, curr_h / 2.0)
 
         # 1. Glow exterior
-        glow_pad = 3.0 * scale
+        glow_pad = 3.5 * scale
         self._draw_rounded_capsule(
             x1 - glow_pad, y1 - glow_pad,
             x2 + glow_pad, y2 + glow_pad,
@@ -472,12 +490,12 @@ class RobotVisorCanvas(tk.Canvas):
         self._draw_rounded_capsule(
             x1, y1, x2, y2,
             corner_r,
-            fill=self.c_cyan_bright, outline=self.c_cyan_glow, width=max(1.0, 1.5 * scale)
+            fill=self.c_cyan_bright, outline=self.c_cyan_glow, width=max(1.5, 2.0 * scale)
         )
 
         # 3. Pupila blanca de destello
         if scale_y > 0.4:
-            spark_sz = 8.0 * scale
+            spark_sz = 10.0 * scale
             sp_x = ex + ew * 0.12
             sp_y = ey - curr_h * 0.22
             self.create_rectangle(
@@ -533,21 +551,70 @@ class RobotVisorCanvas(tk.Canvas):
             self.create_rectangle(ex - 4 * scale, ey - 4 * scale, ex + 4 * scale, ey + 4 * scale, fill="#ffffff", outline="")
 
     def _draw_sleeping_eyes(self, lx: float, rx: float, ey: float, scale: float, t: float):
-        """Ojos cerrados pacíficamente (-  -)."""
-        w = 38.0 * scale
+        """Ojos cerrados pacíficamente (-  -) con trazo grueso y resplandor neón."""
+        w = 48.0 * scale
         for ex in [lx, rx]:
-            self.create_line(ex - w / 2.0, ey, ex + w / 2.0, ey, fill=self.c_cyan_bright, width=max(2.5, 4.0 * scale), capstyle="round")
+            # Glow exterior
+            self.create_line(ex - w / 2.0, ey, ex + w / 2.0, ey, fill=self.c_cyan_dim, width=max(5.0, 7.5 * scale), capstyle="round")
+            # Núcleo brillante
+            self.create_line(ex - w / 2.0, ey, ex + w / 2.0, ey, fill=self.c_cyan_bright, width=max(3.0, 4.5 * scale), capstyle="round")
 
     def _draw_floating_zs(self, start_x: float, start_y: float, scale: float, t: float):
-        """Letras Z flotantes."""
-        zs = ["z", "Z"]
+        """Letras Z flotantes nítidas, grandes y brillantes."""
+        zs = ["z", "Z", "z"]
         for i, ch in enumerate(zs):
-            phase = (t * 0.8 + i * 0.6) % 2.0
-            fade_y = start_y - (phase * 22.0 * scale)
-            fade_x = start_x + math.sin(phase * 3.0) * 6.0
-            col = "#38bdf8" if phase < 1.4 else "#074a6b"
-            sz = int(max(7, (8 + i * 3) * scale))
+            phase = (t * 0.85 + i * 0.55) % 2.0
+            fade_y = start_y - (phase * 24.0 * scale)
+            fade_x = start_x + math.sin(phase * 3.0) * 8.0 * scale
+            col = "#38bdf8" if phase < 1.3 else "#074a6b"
+            sz = int(max(10, (11 + i * 4) * scale))
             self.create_text(fade_x, fade_y, text=ch, font=("Consolas", sz, "bold"), fill=col)
+
+    def _draw_sad_eye(self, ex: float, ey: float, scale: float, t: float, is_left: bool):
+        """Ojo triste melancólico con párpado caído y lágrima animada."""
+        ew = 48.0 * scale
+        eh = 56.0 * scale
+        x1 = ex - ew / 2.0
+        x2 = ex + ew / 2.0
+        y1 = ey - eh / 2.0
+        y2 = ey + eh / 2.0
+        # Carcasa exterior
+        self._draw_rounded_capsule(x1, y1, x2, y2, 14 * scale, fill="#042033", outline=self.c_cyan_dim, width=1.0)
+        # Ojo interior triste
+        in_ew = 38.0 * scale
+        in_eh = 42.0 * scale
+        in_y = ey + 5.0 * scale
+        self._draw_rounded_capsule(ex - in_ew / 2.0, in_y - in_eh / 2.0, ex + in_ew / 2.0, in_y + in_eh / 2.0, 10 * scale, fill="#00a8cc", outline=self.c_cyan_glow)
+        # Lágrima pixelada animada tenue en el ojo izquierdo
+        if is_left:
+            tear_drop = (t * 1.5) % 2.0
+            if tear_drop < 1.4:
+                ty = ey + 20.0 * scale + (tear_drop * 12.0 * scale)
+                self.create_oval(ex - 2.5 * scale, ty - 3.5 * scale, ex + 2.5 * scale, ty + 3.5 * scale, fill="#38bdf8", outline="")
+
+    def _draw_sad_mouth(self, cx: float, cy: float, scale: float, t: float):
+        """Boca curvada hacia abajo en tristeza :(."""
+        w = 32.0 * scale
+        curve = -7.0 * scale
+        p1 = (cx - w / 2.0, cy - curve / 2.0)
+        p2 = (cx, cy + curve)
+        p3 = (cx + w / 2.0, cy - curve / 2.0)
+        self.create_line(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], fill=self.c_cyan_bright, width=max(2.5, 3.5 * scale), smooth=True, capstyle="round")
+
+    def _draw_heart_eye(self, ex: float, ey: float, scale: float, t: float):
+        """Ojo en forma de corazón brillante ❤️ para afecto, cariño y amistad."""
+        sz = 34.0 * scale
+        bob = math.sin(t * 3.5) * (1.8 * scale)
+        c_heart = "#f43f5e"
+        glow = "#fb7185"
+        self.create_oval(ex - sz * 0.46, ey - sz * 0.38 + bob, ex + sz * 0.04, ey + sz * 0.12 + bob, fill=c_heart, outline=glow, width=1.5)
+        self.create_oval(ex - sz * 0.04, ey - sz * 0.38 + bob, ex + sz * 0.46, ey + sz * 0.12 + bob, fill=c_heart, outline=glow, width=1.5)
+        self.create_polygon(
+            ex - sz * 0.44, ey - sz * 0.04 + bob,
+            ex + sz * 0.44, ey - sz * 0.04 + bob,
+            ex, ey + sz * 0.46 + bob,
+            fill=c_heart, outline=glow, width=1.5, smooth=True
+        )
 
     def _draw_cheeks(self, lx: float, rx: float, cy: float, scale: float, t: float):
         """Mejillas sonrosadas."""
