@@ -53,25 +53,33 @@ TEXT_WHITE = "#ffffff"
 # ==================== HELPERS DE TIPOGRAFÍA JERARQUIZADA ====================
 
 def get_font_title():
-    """Fuente de branding y cabeceras tácticas."""
-    return ctk.CTkFont(family="Consolas", size=13, weight="bold")
+    """Fuente de branding y cabeceras tácticas — 14px bold legible."""
+    return ctk.CTkFont(family="Consolas", size=14, weight="bold")
 
 def get_font_subtitle():
-    """Fuente de subtítulo de identidad y rol."""
-    return ctk.CTkFont(family="Consolas", size=10, weight="normal")
+    """Fuente de subtítulo de identidad y rol — 11px."""
+    return ctk.CTkFont(family="Consolas", size=11, weight="normal")
 
 def get_font_body():
-    """Fuente legible de lectura en burbujas de mensaje (13-14px)."""
-    return ctk.CTkFont(family="Segoe UI", size=13, weight="normal")
+    """Fuente legible de lectura en burbujas de mensaje — 14px cómodo."""
+    return ctk.CTkFont(family="Segoe UI", size=14, weight="normal")
 
 def get_font_code():
-    """Fuente monoespaciada para bloques de código y telemetría."""
+    """Fuente monoespaciada para bloques de código y telemetría — 12px."""
     return ctk.CTkFont(family="Consolas", size=12, weight="normal")
 
 def get_font_badge():
-    """Fuente de badges luminosos y botones compactos."""
-    return ctk.CTkFont(family="Consolas", size=10, weight="bold")
+    """Fuente de badges luminosos y botones compactos — 11px bold."""
+    return ctk.CTkFont(family="Consolas", size=11, weight="bold")
 
 def get_font_icon():
     """Fuente para iconos vectoriales/emojis del riel."""
     return ctk.CTkFont(family="Segoe UI", size=16, weight="bold")
+
+def get_font_header_title():
+    """Fuente grande para el nombre del asistente en el header — 16px bold."""
+    return ctk.CTkFont(family="Consolas", size=16, weight="bold")
+
+def get_font_header_sub():
+    """Fuente pequeña para subtítulo del header — 10px."""
+    return ctk.CTkFont(family="Consolas", size=10, weight="normal")

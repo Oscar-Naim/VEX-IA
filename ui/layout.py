@@ -13,6 +13,7 @@ import threading
 import webbrowser
 from typing import Optional, List, Dict
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import filedialog
 
 import config
@@ -22,7 +23,8 @@ from ui.styles import (
     ACCENT_CYAN, ACCENT_CYAN_GLOW, ACCENT_BLUE, ACCENT_BLUE_HOVER, ACCENT_GREEN,
     ACCENT_RED, ACCENT_AMBER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_CYAN, TEXT_WHITE,
-    get_font_title, get_font_subtitle, get_font_badge, get_font_body, get_font_code
+    get_font_title, get_font_subtitle, get_font_badge, get_font_body, get_font_code,
+    get_font_header_title, get_font_header_sub
 )
 from ui.chat_bubbles import UserMessageCard, VexResponseCard, ToolActionCard
 from ui.robot_visor import RobotVisorCanvas
@@ -522,7 +524,7 @@ class MainWindow(ctk.CTk):
         # 1. HEADER SUPERIOR TÁCTICO
         self.frame_header = ctk.CTkFrame(
             self.frame_main_area,
-            height=112,
+            height=128,
             fg_color=BG_HEADER,
             corner_radius=0,
             border_width=1,
@@ -533,34 +535,34 @@ class MainWindow(ctk.CTk):
 
         # Lado izquierdo del header: Visor Robótico animado y títulos
         header_left = ctk.CTkFrame(self.frame_header, fg_color="transparent")
-        header_left.pack(side="left", fill="y", padx=14, pady=8)
+        header_left.pack(side="left", fill="y", padx=14, pady=10)
 
         # Contenedor estilizado tipo cápsula táctica con brillo neón cian
         self.visor_card = ctk.CTkFrame(
             header_left,
-            width=274,
-            height=94,
+            width=310,
+            height=108,
             fg_color="#03050a",
             corner_radius=16,
             border_width=1.5,
             border_color=ACCENT_CYAN
         )
-        self.visor_card.pack(side="left", padx=(0, 14), pady=0)
+        self.visor_card.pack(side="left", padx=(0, 16), pady=0)
         self.visor_card.pack_propagate(False)
 
         # Visor de Robot Expresivo prominente y centrado en la tarjeta
-        self.visor_canvas = RobotVisorCanvas(self.visor_card, width=268, height=88)
+        self.visor_canvas = RobotVisorCanvas(self.visor_card, width=304, height=102)
         self.visor_canvas.pack(fill="both", expand=True, padx=2, pady=2)
         self.avatar_canvas = self.visor_canvas  # Alias para compatibilidad
 
         # Bloque de título y rol
         title_box = ctk.CTkFrame(header_left, fg_color="transparent")
-        title_box.pack(side="left", fill="y", pady=18)
+        title_box.pack(side="left", fill="y", pady=20)
 
         self.lbl_app_title = ctk.CTkLabel(
             title_box,
             text="VEX // TACTICAL ASSISTANT",
-            font=get_font_title(),
+            font=get_font_header_title(),
             text_color=ACCENT_CYAN
         )
         self.lbl_app_title.pack(anchor="w")
@@ -568,10 +570,12 @@ class MainWindow(ctk.CTk):
         self.lbl_app_sub = ctk.CTkLabel(
             title_box,
             text="LYAXIS labs™ // NEURAL DESKTOP CORE",
-            font=get_font_subtitle(),
-            text_color=TEXT_MUTED
+            font=get_font_header_sub(),
+            text_color=TEXT_MUTED,
+            wraplength=260,
+            justify="left"
         )
-        self.lbl_app_sub.pack(anchor="w")
+        self.lbl_app_sub.pack(anchor="w", pady=(2, 0))
 
         # Lado derecho del header: Controles tácticos
         header_right = ctk.CTkFrame(self.frame_header, fg_color="transparent")
@@ -669,15 +673,33 @@ class MainWindow(ctk.CTk):
         self.btn_widget_mode.pack(side="right", padx=6)
 
         # 2. ÁREA DE CHAT (CANVAS SCROLLEABLE CON RETÍCULA CIBERNÉTICA)
-        self.chat_container = ctk.CTkScrollableFrame(
+        # Fondo con retícula cibernética sutil
+        self._chat_bg_frame = ctk.CTkFrame(
             self.frame_main_area,
             fg_color=BG_CHAT_AREA,
+            corner_radius=0
+        )
+        self._chat_bg_frame.pack(fill="both", expand=True, padx=0, pady=(6, 0))
+
+        # Canvas de retícula OLED (cuadrícula cyber)
+        self._grid_canvas = tk.Canvas(
+            self._chat_bg_frame,
+            bg=BG_CHAT_AREA,
+            highlightthickness=0,
+            bd=0
+        )
+        self._grid_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._grid_canvas.bind("<Configure>", self._redraw_cyber_grid)
+
+        self.chat_container = ctk.CTkScrollableFrame(
+            self._chat_bg_frame,
+            fg_color="transparent",
             corner_radius=0,
             scrollbar_button_color="#1e293b",
             scrollbar_button_hover_color=ACCENT_CYAN,
             scrollbar_fg_color="#070a12"
         )
-        self.chat_container.pack(fill="both", expand=True, padx=20, pady=(10, 85))
+        self.chat_container.pack(fill="both", expand=True, padx=20, pady=(6, 80))
         self.chat_container.bind("<Configure>", self._on_chat_resize)
         self.chat_container.bind("<MouseWheel>", self._on_chat_mouse_wheel, add=True)
         self.chat_container._parent_canvas.bind("<MouseWheel>", self._on_chat_mouse_wheel, add=True)
@@ -685,6 +707,7 @@ class MainWindow(ctk.CTk):
         # Espaciador inferior dinámico para evitar que la cápsula flotante tape los últimos mensajes
         self._chat_bottom_spacer = ctk.CTkFrame(self.chat_container, height=85, fg_color="transparent")
         self._chat_bottom_spacer.pack(fill="x", pady=0)
+
 
         # 3. CÁPSULA FLOTANTE INFERIOR
         self.frame_floating_input = ctk.CTkFrame(
@@ -1022,6 +1045,34 @@ class MainWindow(ctk.CTk):
         for child in widget.winfo_children():
             self._bind_mousewheel_recursive(child)
 
+    def _redraw_cyber_grid(self, event=None):
+        """Dibuja la retícula cibernética sutil (cyber grid) como textura de fondo OLED."""
+        try:
+            canvas = self._grid_canvas
+            canvas.delete("grid")
+            w = canvas.winfo_width()
+            h = canvas.winfo_height()
+            if w < 10 or h < 10:
+                return
+            # Cuadrícula de puntos de 36px de espaciado — luz cian ultra-tenue
+            step = 36
+            for x in range(0, w, step):
+                for y in range(0, h, step):
+                    canvas.create_oval(
+                        x - 1, y - 1, x + 1, y + 1,
+                        fill="#0d1829", outline="",
+                        tags="grid"
+                    )
+            # Líneas horizontales ultra-sutiles cada 72px
+            for y in range(0, h, 72):
+                canvas.create_line(
+                    0, y, w, y,
+                    fill="#0a1220", width=1,
+                    tags="grid"
+                )
+        except Exception:
+            pass
+
     def _on_chat_resize(self, event):
         """Ajusta dinámicamente el ancho de envoltura al redimensionar la ventana."""
         new_width = event.width
@@ -1032,6 +1083,7 @@ class MainWindow(ctk.CTk):
                     card.update_wraplength(wrap)
                 except Exception:
                     pass
+
 
     def _on_re_speak(self, text_to_speak: str):
         """Vocaliza de nuevo un mensaje al pulsar 'Escuchar de nuevo'."""

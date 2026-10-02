@@ -184,15 +184,26 @@ class RobotVisorCanvas(tk.Canvas):
         w, h = float(self.width), float(self.height)
         cx, cy = w / 2.0, h / 2.0
 
-        # Factor de escala adaptativo según si es visor de cabecera (< 340px) o pantalla completa
-        if w < 340:
-            visor_w = max(w - 4.0, 90.0)
-            visor_h = max(h - 4.0, 50.0)
-            scale = max(0.80, min(visor_w / 330.0, visor_h / 105.0) * 1.48)
-            r_outer = min(28.0, visor_h / 2.0)
-            r_inner = max(11.0, r_outer - 3.5)
+        # Factor de escala adaptativo según si es visor de cabecera o pantalla completa
+        # Umbral 280px: visor ≥280px usa modo normal con ojos completos y expresivos
+        if w < 280:
+            # Modo ultra-compacto (widget flotante pequeño)
+            visor_w = max(w - 4.0, 80.0)
+            visor_h = max(h - 4.0, 44.0)
+            scale = max(0.62, min(visor_w / 270.0, visor_h / 88.0) * 1.35)
+            r_outer = min(22.0, visor_h / 2.0)
+            r_inner = max(9.0, r_outer - 3.0)
             compact = True
+        elif w < 380:
+            # Modo header (304px-380px): ojos a escala media, expresivos y visibles
+            visor_w = max(w - 6.0, 200.0)
+            visor_h = max(h - 6.0, 70.0)
+            scale = max(0.88, min(visor_w / 320.0, visor_h / 100.0) * 1.55)
+            r_outer = min(32.0, visor_h / 2.0)
+            r_inner = max(14.0, r_outer - 4.0)
+            compact = False  # Modo medio: habilitar telemetria y detalles
         else:
+            # Modo pantalla completa
             visor_w = min(w - 24.0, 600.0)
             visor_w = max(visor_w, 280.0)
             visor_h = min(h - 16.0, 240.0)
@@ -723,30 +734,54 @@ class RobotVisorCanvas(tk.Canvas):
     # ================= DIBUJO DE LA BOCA =================
 
     def _draw_speaking_or_idle_mouth(self, cx: float, cy: float, scale: float, t: float):
-        """Boca que articula fonemas al hablar o sonríe en reposo."""
+        """Boca articulada: onda continua al hablar, sonrisa suave en reposo."""
         if self.is_speaking or self.state == "speaking":
-            phase = int((t * 14.0) % 5)
-            w = 16.0 * scale
-            if phase == 0:
-                self.create_rectangle(cx - w, cy - 2, cx + w, cy + 2, fill=self.c_cyan_bright, outline=self.c_white)
-            elif phase == 1:
-                r = 8.0 * scale
-                self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=self.c_cyan_bright, outline=self.c_white, width=1.5)
-            elif phase == 2:
-                self._draw_rounded_capsule(cx - w * 1.2, cy - 6 * scale, cx + w * 1.2, cy + 6 * scale, 6 * scale, fill=self.c_cyan_bright, outline=self.c_white)
-            elif phase == 3:
-                self.create_rectangle(cx - w * 1.4, cy - 2, cx + w * 1.4, cy + 2, fill=self.c_cyan_glow, outline="")
-            else:
-                self.create_line(cx - w, cy - 2, cx, cy + 3 * scale, cx + w, cy - 2, fill=self.c_cyan_bright, width=max(2.0, 3.5 * scale), smooth=True)
+            # Articulación senoidal continua: combina 3 ondas para variedad orgánica
+            amp1 = abs(math.sin(t * 9.5)) * 6.0 * scale
+            amp2 = abs(math.sin(t * 6.3 + 1.2)) * 3.0 * scale
+            open_h = max(1.5, amp1 + amp2)
+
+            # Ancho modulado por baja frecuencia (labios que se abren/cierran)
+            w_base = 16.0 * scale
+            w_mod = math.sin(t * 4.5) * 3.0 * scale
+            w = w_base + w_mod
+
+            # Glow exterior de la boca
+            glow_pad = 2.5 * scale
+            self._draw_rounded_capsule(
+                cx - w - glow_pad, cy - open_h * 0.5 - glow_pad,
+                cx + w + glow_pad, cy + open_h * 0.5 + glow_pad,
+                (open_h + glow_pad * 2) / 2.0,
+                fill=self.c_cyan_dim, outline=""
+            )
+            # Interior de la boca (negro puro)
+            if open_h > 2.0 * scale:
+                self._draw_rounded_capsule(
+                    cx - w * 0.88, cy - open_h * 0.38,
+                    cx + w * 0.88, cy + open_h * 0.38,
+                    max(2.0, open_h * 0.38),
+                    fill=self.c_oled_black, outline=""
+                )
+            # Borde brillante cian
+            self._draw_rounded_capsule(
+                cx - w, cy - open_h * 0.5,
+                cx + w, cy + open_h * 0.5,
+                max(2.0, open_h / 2.0),
+                fill="", outline=self.c_cyan_bright,
+                width=max(1.5, 2.0 * scale)
+            )
         else:
+            # Idle: leve sonrisa cerrada
             w = 12.0 * scale
             self.create_line(
                 cx - w, cy - 2,
                 cx - w * 0.4, cy + 2 * scale,
                 cx + w * 0.4, cy + 2 * scale,
                 cx + w, cy - 2,
-                fill=self.c_cyan_bright, width=max(2.0, 3.0 * scale), smooth=True, capstyle="round"
+                fill=self.c_cyan_bright, width=max(2.0, 3.0 * scale),
+                smooth=True, capstyle="round"
             )
+
 
     def _draw_smug_mouth(self, cx: float, cy: float, scale: float, t: float):
         """Sonrisa cómplice (smirk) para modo Cool."""
@@ -851,34 +886,70 @@ class RobotVisorCanvas(tk.Canvas):
         self.create_polygon(cone_pts, fill="#d97706", outline="#b45309", width=1.5)
 
     def _draw_pixel_music(self, cx: float, cy: float, scale: float, t: float):
-        """Notas musicales flotantes 🎵."""
-        bob = math.sin(t * 5.0) * (2.5 * scale)
-        base_x = cx
-        base_y = cy + bob - 6 * scale
+        """Notas musicales flotantes animadas con ecualizador reactivo premium."""
+        # --- NOTAS FLOTANTES (3 notas en posiciones desfasadas) ---
+        note_configs = [
+            (-22.0, 0.0,   t * 1.1,   0.0),   # Nota 1: izquierda, ciclo lento
+            (  3.0, -8.0,  t * 1.45, 1.8),    # Nota 2: centro-derecha, ciclo medio
+            ( 24.0,  4.0,  t * 0.85, 3.5),    # Nota 3: derecha, ciclo lento desfasado
+        ]
 
-        # Nota izquierda
-        self.create_oval(base_x - 18 * scale, base_y + 4 * scale, base_x - 8 * scale, base_y + 12 * scale, fill=self.c_cyan_bright, outline="")
-        self.create_line(base_x - 9 * scale, base_y + 6 * scale, base_x - 9 * scale, base_y - 14 * scale, fill=self.c_cyan_bright, width=max(2.0, 2.5 * scale))
+        for dx, base_dy, phase, phase_offset in note_configs:
+            # Flotación vertical individual por nota
+            float_y = math.sin(phase + phase_offset) * 7.0 * scale
+            nx = cx + dx * scale
+            ny = cy + base_dy * scale + float_y - 8.0 * scale
 
-        # Nota derecha
-        self.create_oval(base_x + 6 * scale, base_y, base_x + 16 * scale, base_y + 8 * scale, fill=self.c_cyan_bright, outline="")
-        self.create_line(base_x + 15 * scale, base_y + 2 * scale, base_x + 15 * scale, base_y - 18 * scale, fill=self.c_cyan_bright, width=max(2.0, 2.5 * scale))
+            # Opacidad simulada con color interpolado (brillante cuando sube, tenue cuando baja)
+            visibility = (math.sin(phase + phase_offset) + 1.0) / 2.0
+            note_color = self.c_cyan_bright if visibility > 0.35 else self.c_cyan_glow
 
-        # Barra
-        self.create_polygon([
-            base_x - 9 * scale, base_y - 14 * scale,
-            base_x + 15 * scale, base_y - 18 * scale,
-            base_x + 15 * scale, base_y - 14 * scale,
-            base_x - 9 * scale, base_y - 10 * scale
-        ], fill=self.c_cyan_bright)
+            # Cabeza de nota ovalada
+            head_rx = 6.0 * scale
+            head_ry = 4.5 * scale
+            self.create_oval(
+                nx - head_rx, ny + 10 * scale,
+                nx + head_rx, ny + 10 * scale + head_ry * 2,
+                fill=note_color, outline=""
+            )
+            # Palo vertical de la nota
+            self.create_line(
+                nx + head_rx - 1, ny + 12 * scale,
+                nx + head_rx - 1, ny - 4 * scale,
+                fill=note_color, width=max(1.5, 2.0 * scale)
+            )
+            # Bandera de corchea (gancho curvo superior)
+            self.create_line(
+                nx + head_rx - 1, ny - 4 * scale,
+                nx + head_rx + 6 * scale, ny + 2 * scale,
+                fill=note_color, width=max(1.5, 2.0 * scale)
+            )
 
-        # Mini ecualizador 3 barras
-        eq_y = cy + 22.0 * scale
-        for i in range(3):
-            bx = base_x - 10 * scale + i * 9 * scale
-            val = math.sin(t * 12.0 + i * 2.0) * 0.5 + 0.5
-            bh = (4 + val * 12) * scale
-            self.create_rectangle(bx, eq_y - bh, bx + 5 * scale, eq_y, fill=self.c_cyan_glow, outline="")
+        # --- ECUALIZADOR DE 5 BARRAS REACTIVO ---
+        eq_y = cy + 28.0 * scale
+        bar_w = 5.5 * scale
+        bar_gap = 4.5 * scale
+        total_w = 5 * (bar_w + bar_gap) - bar_gap
+        start_x = cx - total_w / 2.0
+
+        bar_colors = [
+            self.c_cyan_bright, self.c_cyan_glow, self.c_cyan_bright,
+            self.c_cyan_glow, self.c_cyan_bright
+        ]
+
+        for i in range(5):
+            bx = start_x + i * (bar_w + bar_gap)
+            # Cada barra tiene su propia frecuencia de oscilación
+            val = math.sin(t * (8.0 + i * 2.5) + i * 1.2) * 0.5 + 0.5
+            min_h = 3.0 * scale
+            max_h = 16.0 * scale
+            bh = min_h + val * (max_h - min_h)
+
+            self.create_rectangle(
+                bx, eq_y - bh,
+                bx + bar_w, eq_y,
+                fill=bar_colors[i], outline=""
+            )
 
     def _draw_pixel_search(self, cx: float, cy: float, scale: float, t: float):
         """Lupa pixelada 🔍."""

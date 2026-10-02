@@ -128,14 +128,14 @@ class UserMessageCard(ctk.CTkFrame):
             text_color=TEXT_PRIMARY,
             justify="left",
             anchor="w",
-            wraplength=480
+            wraplength=560
         )
         self.lbl_text.pack(fill="x", padx=14, pady=(0, 12))
 
     def update_wraplength(self, wrap_width: int):
         """Actualiza el ancho de envoltura del texto responsivamente."""
         try:
-            self.lbl_text.configure(wraplength=max(260, wrap_width))
+            self.lbl_text.configure(wraplength=max(280, wrap_width - 40))
         except Exception:
             pass
 
@@ -252,7 +252,7 @@ class VexResponseCard(ctk.CTkFrame):
                 text_color=TEXT_PRIMARY,
                 justify="left",
                 anchor="w",
-                wraplength=480
+                wraplength=560
             )
             lbl.pack(fill="x", pady=2)
             self.text_labels.append(lbl)
@@ -270,7 +270,7 @@ class VexResponseCard(ctk.CTkFrame):
                     text_color=TEXT_PRIMARY,
                     justify="left",
                     anchor="w",
-                    wraplength=480
+                    wraplength=560
                 )
                 lbl.pack(fill="x", pady=2)
                 self.text_labels.append(lbl)
@@ -288,7 +288,7 @@ class VexResponseCard(ctk.CTkFrame):
         """Ajusta el ancho de envoltura de los textos dentro de la burbuja."""
         for lbl in self.text_labels:
             try:
-                lbl.configure(wraplength=max(260, wrap_width))
+                lbl.configure(wraplength=max(280, wrap_width - 40))
             except Exception:
                 pass
 

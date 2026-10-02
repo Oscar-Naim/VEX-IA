@@ -61,42 +61,64 @@ def is_spotify_installed() -> bool:
 
 def _auto_play_spotify(query: str):
     """
-    Automatización en segundo plano:
-    Espera a que el cliente de Spotify cargue la consulta mediante el protocolo URI
-    y envía la pulsación para iniciar de inmediato la reproducción del primer resultado.
+    Automatización en segundo plano mejorada:
+    Espera que Spotify cargue la búsqueda mediante URI,
+    enfoca la ventana y envía Enter para reproducir el primer resultado.
+    Múltiples intentos con retrasos escalonados para mayor fiabilidad.
     """
-    time.sleep(1.8)
+    # Fase 1: Esperar que Spotify cargue la vista de búsqueda
+    time.sleep(2.2)
+
     if not (HAVE_PYAUTOGUI or HAVE_WIN32):
         return
 
-    try:
-        # 1. Localizar y enfocar la ventana de Spotify
-        target_hwnd = None
-        if HAVE_WIN32:
-            def enum_handler(hwnd, _):
-                nonlocal target_hwnd
-                if win32gui.IsWindowVisible(hwnd):
-                    title = win32gui.GetWindowText(hwnd).lower()
-                    cls = win32gui.GetClassName(hwnd)
-                    if "spotify" in title or "spotify" in cls.lower():
-                        target_hwnd = hwnd
+    target_hwnd = None
 
-            win32gui.EnumWindows(enum_handler, None)
-            if target_hwnd:
-                try:
-                    win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-                    win32gui.SetForegroundWindow(target_hwnd)
-                except Exception:
-                    pass
+    # Intentar localizar y enfocar ventana de Spotify (hasta 3 intentos)
+    for attempt in range(3):
+        try:
+            if HAVE_WIN32:
+                def enum_handler(hwnd, _):
+                    nonlocal target_hwnd
+                    if win32gui.IsWindowVisible(hwnd):
+                        title = win32gui.GetWindowText(hwnd).lower()
+                        cls_name = win32gui.GetClassName(hwnd).lower()
+                        if "spotify" in title or "spotify" in cls_name or "chrome_widgetwin" in cls_name:
+                            target_hwnd = hwnd
 
-        time.sleep(0.4)
-        if HAVE_PYAUTOGUI:
-            # En la vista de búsqueda abierta por URI, presionar Enter selecciona y reproduce el Top Result
+                win32gui.EnumWindows(enum_handler, None)
+
+                if target_hwnd:
+                    try:
+                        win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+                        time.sleep(0.15)
+                        win32gui.SetForegroundWindow(target_hwnd)
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
+                    break
+        except Exception:
+            pass
+
+        if not target_hwnd:
+            time.sleep(0.8)  # Esperar más si Spotify aún no apareció
+
+    # Fase 2: Enviar Enter para activar el Top Result de la búsqueda
+    if HAVE_PYAUTOGUI and target_hwnd:
+        try:
+            time.sleep(0.4)
+            pyautogui.press("enter")  # Seleccionar primer resultado
+            time.sleep(0.25)
+            pyautogui.press("enter")  # Confirmar reproducción
+        except Exception as e:
+            print(f"[MediaController] Error en auto-reproducción: {e}")
+    elif HAVE_PYAUTOGUI:
+        # Fallback: aun sin hwnd detectado, intentar con foco global
+        try:
+            time.sleep(0.5)
             pyautogui.press("enter")
-            time.sleep(0.3)
-            pyautogui.press("enter")
-    except Exception as e:
-        print(f"[MediaController] Advertencia en auto-reproducción de Spotify: {e}")
+        except Exception:
+            pass
 
 
 def play_spotify(query: str) -> str:
@@ -118,15 +140,18 @@ def play_spotify(query: str) -> str:
     opened_desktop = False
 
     if sys.platform == "win32":
+        # Método 1: Protocolo URI nativo spotify:search: (más directo)
         try:
-            # Deep linking nativo por protocolo URI
             uri = f"spotify:search:{encoded}"
             os.startfile(uri)
             opened_desktop = True
         except Exception:
-            # Respaldo con comando start si el protocolo no responde directamente
+            # Método 2: Respaldo con subprocess start
             try:
-                subprocess.Popen(f'start spotify:search:"{encoded}"', shell=True)
+                subprocess.Popen(
+                    ["cmd", "/c", f'start spotify:search:{encoded}'],
+                    shell=False, creationflags=subprocess.CREATE_NO_WINDOW
+                )
                 opened_desktop = True
             except Exception:
                 opened_desktop = False
