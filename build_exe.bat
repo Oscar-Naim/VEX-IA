@@ -9,7 +9,7 @@ python -m pip install --upgrade pyinstaller
 
 echo.
 echo [2/3] Empaquetando VEX en ejecutable autonomo (VEX.exe)...
-pyinstaller --noconsole --onefile --name "VEX" --collect-data customtkinter --copy-metadata packaging --add-data "config;config" main.py
+pyinstaller --noconsole --onefile --name "VEX" --collect-all vosk --collect-all customtkinter --copy-metadata packaging --add-data "config;config" main.py
 
 echo.
 echo ==============================================================================

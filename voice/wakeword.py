@@ -20,7 +20,7 @@ try:
     import vosk
     vosk.SetLogLevel(-1)
     HAVE_VOSK = True
-except ImportError:
+except Exception:
     HAVE_VOSK = False
 
 

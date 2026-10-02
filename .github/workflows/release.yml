@@ -37,7 +37,7 @@ jobs:
 
       - name: Compilar ejecutable con PyInstaller
         run: |
-          pyinstaller --noconsole --onefile --name "VEX" --collect-data customtkinter --copy-metadata packaging main.py
+          pyinstaller --noconsole --onefile --name "VEX" --collect-all vosk --collect-all customtkinter --copy-metadata packaging main.py
 
       - name: Verificar ejecutable generado
         shell: bash

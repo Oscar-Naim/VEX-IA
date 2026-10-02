@@ -2,14 +2,19 @@
 LYAXIS labs™ - Configuración Global y Gestión BYOK Multi-Usuario
 Almacenamiento persistente desacoplado en config/user_config.json y sincronización .env.
 """
+import sys
 import os
 import json
 from pathlib import Path
 from dotenv import load_dotenv, set_key
 
 # Rutas del Proyecto
-BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    CONFIG_DIR = BASE_DIR / "config"
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    CONFIG_DIR = Path(__file__).resolve().parent
 ENV_FILE = BASE_DIR / ".env"
 USER_CONFIG_FILE = CONFIG_DIR / "user_config.json"
 TEMP_AUDIO_FILE = str(BASE_DIR / "temp_vex_voice.mp3")
