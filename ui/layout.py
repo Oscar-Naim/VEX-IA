@@ -26,6 +26,7 @@ from ui.styles import (
 )
 from ui.chat_bubbles import UserMessageCard, VexResponseCard, ToolActionCard
 from ui.robot_visor import RobotVisorCanvas
+from ui.floating_widget import FloatingWidget
 from voice.tts import TextToSpeechEngine
 from voice.stt import SpeechToTextListener
 from voice.manager import VoiceAssistantManager, AssistantState
@@ -256,6 +257,15 @@ class MainWindow(ctk.CTk):
         # Construcción visual de las 3 zonas del layout
         self._build_layout()
 
+        # Inicialización del Mini-VEX Companion (Widget flotante Always-on-Top)
+        self.floating_widget = FloatingWidget(
+            master=self,
+            on_restore=self.restore_from_floating_widget,
+            on_toggle_hands_free=self._toggle_hands_free,
+            on_quit=self.on_closing
+        )
+        self.floating_widget.withdraw()
+
         # Atajos de teclado
         self.bind("<Escape>", lambda event: self._on_escape_pressed())
 
@@ -386,6 +396,21 @@ class MainWindow(ctk.CTk):
             command=lambda: self._handle_user_prompt("Quiero un helado")
         )
         btn_ice.pack(side="top", pady=4)
+
+        # Icono Modo Widget Flotante (Mini-VEX)
+        self.btn_rail_widget = ctk.CTkButton(
+            self.frame_rail,
+            text="⧉",
+            width=44,
+            height=44,
+            fg_color="transparent",
+            hover_color="#141c2e",
+            text_color=ACCENT_CYAN,
+            corner_radius=10,
+            font=ctk.CTkFont(family="Segoe UI", size=16),
+            command=self.show_floating_widget
+        )
+        self.btn_rail_widget.pack(side="top", pady=4)
 
         # Riel inferior: Ajustes BYOK e indicador ONLINE
         self.btn_rail_settings = ctk.CTkButton(
@@ -612,6 +637,23 @@ class MainWindow(ctk.CTk):
             command=self._toggle_hands_free
         )
         self.btn_hands_free.pack(side="right", padx=6)
+
+        # Botón Modo Widget Flotante (Mini-VEX Companion)
+        self.btn_widget_mode = ctk.CTkButton(
+            header_right,
+            text="⧉ WIDGET",
+            width=92,
+            height=28,
+            fg_color="#0e1626",
+            hover_color="#18233b",
+            border_color=BORDER_BLUE,
+            border_width=1.2,
+            corner_radius=8,
+            text_color="#94a3b8",
+            font=get_font_badge(),
+            command=self.show_floating_widget
+        )
+        self.btn_widget_mode.pack(side="right", padx=6)
 
         # 2. ÁREA DE CHAT (CANVAS SCROLLEABLE CON RETÍCULA CIBERNÉTICA)
         self.chat_container = ctk.CTkScrollableFrame(
@@ -985,18 +1027,11 @@ class MainWindow(ctk.CTk):
     # ================= SINCRONIZACIÓN Y ESTADOS DEL VISOR ROBÓTICO =================
 
     def _set_hud_state(self, state_name: str):
-        """Actualiza el estado del visor robótico."""
+        """Actualiza el estado del visor robótico en el HUD y en el widget flotante."""
         self.visor_canvas.set_state(state_name)
+        if hasattr(self, "floating_widget") and self.floating_widget:
+            self.floating_widget.set_state(state_name)
 
-    def _on_agent_emotion(self, expression: str, icon: Optional[str], duration: float):
-        """Callback invocado al detectarse una emoción en la respuesta del agente."""
-        self.after(0, lambda: self._apply_visor_emotion(expression, icon, duration))
-
-    def _apply_visor_emotion(self, expression: str, icon: Optional[str], duration: float):
-        if icon:
-            self.visor_canvas.show_icon(icon, duration=duration)
-        if expression and expression != "idle":
-            self.visor_canvas.set_expression(expression, duration=duration)
 
     def _update_mic_breathing(self):
         """Animación de respiración pulsante del botón de micrófono."""
@@ -1082,6 +1117,41 @@ class MainWindow(ctk.CTk):
         self.after(0, lambda: self.menu_model.set(new_model))
         self.after(0, lambda: self._add_message_card("system", f"⚡ Failover: Conmutado a '{new_model}'."))
 
+    def _on_agent_emotion(self, expr_name: str, icon_name: Optional[str], duration: float):
+        """Callback thread-safe para reflejar expresiones e iconos en el visor principal y widget flotante."""
+        def apply():
+            if expr_name and expr_name != "idle":
+                self.visor_canvas.set_expression(expr_name, duration)
+                if hasattr(self, "floating_widget") and self.floating_widget:
+                    self.floating_widget.set_expression(expr_name, duration)
+            if icon_name:
+                self.visor_canvas.show_icon(icon_name, duration)
+                if hasattr(self, "floating_widget") and self.floating_widget:
+                    self.floating_widget.show_icon(icon_name, duration)
+        self.after(0, apply)
+
+    def show_floating_widget(self):
+        """Minimiza la ventana principal del HUD y activa el Mini-VEX Companion flotante."""
+        if hasattr(self, "floating_widget") and self.floating_widget:
+            # Sincronizar estado visual del visor
+            self.floating_widget.set_state(self.visor_canvas.state)
+            self.floating_widget.set_speaking(self.visor_canvas.is_speaking)
+            self.floating_widget.set_expression(self.visor_canvas.expression)
+            if self.visor_canvas.active_icon:
+                self.floating_widget.show_icon(self.visor_canvas.active_icon)
+
+            self.floating_widget.deiconify()
+            self.floating_widget.lift()
+            self.withdraw()
+
+    def restore_from_floating_widget(self):
+        """Restaura la ventana principal completa de VEX y oculta el widget flotante."""
+        if hasattr(self, "floating_widget") and self.floating_widget:
+            self.floating_widget.withdraw()
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
     def _open_byok_modal(self):
         def on_saved(key, user_name):
             self.agent.reload_api_key()
@@ -1150,10 +1220,18 @@ class MainWindow(ctk.CTk):
 
             if local_result.icon:
                 self.visor_canvas.show_icon(local_result.icon, duration=local_result.icon_duration)
+                if hasattr(self, "floating_widget") and self.floating_widget:
+                    self.floating_widget.show_icon(local_result.icon, duration=local_result.icon_duration)
             if local_result.expression and local_result.expression != "idle":
                 self.visor_canvas.set_expression(local_result.expression, duration=local_result.icon_duration)
+                if hasattr(self, "floating_widget") and self.floating_widget:
+                    self.floating_widget.set_expression(local_result.expression, duration=local_result.icon_duration)
 
             self.tts.speak(local_result.spoken_response)
+
+            # Transición automática a Mini-VEX Widget si se abrió una aplicación, web o archivo
+            if any(act in local_result.action_name for act in ["launch_application", "open_url", "search_youtube", "write_note"]):
+                self.after(550, self.show_floating_widget)
             return
 
         # CAPA 1: INFERENCIA INTELIGENTE GEMINI
@@ -1161,6 +1239,8 @@ class MainWindow(ctk.CTk):
         self.voice_mgr.set_state(AssistantState.THINKING)
         self._set_hud_state("thinking")
         self.visor_canvas.set_expression("thinking")
+        if hasattr(self, "floating_widget") and self.floating_widget:
+            self.floating_widget.set_expression("thinking")
 
         def task():
             response = self.agent.send_message(prompt)
@@ -1176,6 +1256,8 @@ class MainWindow(ctk.CTk):
         args_str = ", ".join(f"{k}='{v}'" for k, v in args.items())
         msg = f"Herramienta ejecutada: {tool_name}({args_str}) -> {result}"
         self.after(0, lambda: self._add_message_card("system", msg))
+        if tool_name in ["launch_application", "open_url", "search_youtube", "write_note"]:
+            self.after(550, self.show_floating_widget)
 
     # ================= ORQUESTACIÓN DEL ASISTENTE Y WAKE WORD =================
 
@@ -1187,6 +1269,8 @@ class MainWindow(ctk.CTk):
     def _on_wake_flash_triggered(self):
         """Dispara el destello y halo cian neón en el visor al detectar la palabra clave 'VEX'."""
         self.after(0, lambda: self.visor_canvas.trigger_wake_flash(duration=0.65))
+        if hasattr(self, "floating_widget") and self.floating_widget:
+            self.after(0, lambda: self.floating_widget.trigger_wake_flash(duration=0.65))
 
     def _on_assistant_state_change(self, new_state: AssistantState):
         """Callback thread-safe para reflejar el estado del asistente en la interfaz."""
@@ -1278,6 +1362,29 @@ class MainWindow(ctk.CTk):
                 text_color=ACCENT_CYAN
             )
 
+        # Sincronización continua con el Mini-VEX Companion flotante
+        if hasattr(self, "floating_widget") and self.floating_widget:
+            try:
+                if state == AssistantState.STANDBY:
+                    self.floating_widget.set_expression("sleeping")
+                    self.floating_widget.set_speaking(False)
+                elif state == AssistantState.WAKE:
+                    self.floating_widget.set_expression("happy", duration=1.2)
+                    self.floating_widget.set_speaking(False)
+                elif state == AssistantState.LISTENING:
+                    self.floating_widget.set_expression("listening")
+                    self.floating_widget.set_speaking(False)
+                elif state == AssistantState.THINKING:
+                    self.floating_widget.set_expression("thinking")
+                    self.floating_widget.set_speaking(False)
+                elif state == AssistantState.SPEAKING:
+                    self.floating_widget.set_speaking(True)
+                elif state == AssistantState.FOLLOW_UP:
+                    self.floating_widget.set_expression("listening")
+                    self.floating_widget.set_speaking(False)
+            except Exception:
+                pass
+
     # ================= CONTROL DE VOZ =================
 
     def _toggle_voice_input(self):
@@ -1289,6 +1396,11 @@ class MainWindow(ctk.CTk):
 
     def on_closing(self):
         self.hands_free_mode = False
+        try:
+            if hasattr(self, "floating_widget") and self.floating_widget:
+                self.floating_widget.destroy()
+        except Exception:
+            pass
         try:
             self.voice_mgr.shutdown()
         except Exception:
