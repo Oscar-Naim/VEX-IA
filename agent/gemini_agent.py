@@ -72,12 +72,10 @@ def detect_emotion_and_icon(prompt: str, response: str) -> Tuple[str, Optional[s
 
 class GeminiAgent:
     AVAILABLE_MODELS: List[str] = getattr(config, "AVAILABLE_MODELS", [
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-3.8-flash",
+        "gemini-flash-lite-latest",
+        "gemini-3.5-flash",
         "gemini-flash-latest",
-        "gemini-2.0-flash",
-        "gemini-2.5-pro",
+        "gemini-3.7-flash",
     ])
 
     def __init__(
@@ -143,16 +141,42 @@ class GeminiAgent:
             max_output_tokens=150,  # Límite táctico de salida concisa
         )
 
+    def _sanitize_history(self, history: list) -> list:
+        """Filtra y sanea el historial asegurando que solo contenga roles válidos ('user', 'model')."""
+        clean = []
+        for item in history:
+            try:
+                role = getattr(item, "role", None)
+                parts = getattr(item, "parts", None)
+                if role in ("user", "model") and parts:
+                    clean.append(item)
+            except Exception:
+                pass
+        return clean
+
     def _create_chat_session(self, model_name: str, history: Optional[list] = None):
         """Crea una sesión de chat con el modelo especificado y recorte de historial."""
         if not self.client:
             return None
         chat_config = self._build_chat_config()
-        return self.client.chats.create(
-            model=model_name,
-            config=chat_config,
-            history=history or []
-        )
+        clean_hist = self._sanitize_history(history or [])
+        try:
+            return self.client.chats.create(
+                model=model_name,
+                config=chat_config,
+                history=clean_hist
+            )
+        except Exception as e:
+            # Si el historial causa conflicto en el cambio de modelo, iniciar sesión limpia
+            try:
+                return self.client.chats.create(
+                    model=model_name,
+                    config=chat_config,
+                    history=[]
+                )
+            except Exception as ex:
+                safe_print(f"[VEX Core] Error creando chat con {model_name}: {self._sanitize_error(str(ex))}")
+                return None
 
     def _initialize_client(self):
         """Inicializa el cliente de Gemini y la sesión de chat inicial."""

@@ -20,6 +20,7 @@ from ui.styles import (
     BG_ROOT, BG_RAIL, BG_CHATS_PANEL, BG_HEADER, BG_CHAT_AREA, BG_INPUT_CAPSULE,
     BORDER_SUBTLE, BORDER_CARD, BORDER_BLUE, BORDER_CYAN, BORDER_GREEN,
     ACCENT_CYAN, ACCENT_CYAN_GLOW, ACCENT_BLUE, ACCENT_BLUE_HOVER, ACCENT_GREEN,
+    ACCENT_RED, ACCENT_AMBER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_CYAN, TEXT_WHITE,
     get_font_title, get_font_subtitle, get_font_badge, get_font_body, get_font_code
 )
@@ -616,10 +617,17 @@ class MainWindow(ctk.CTk):
         self.chat_container = ctk.CTkScrollableFrame(
             self.frame_main_area,
             fg_color=BG_CHAT_AREA,
-            corner_radius=0
+            corner_radius=0,
+            scrollbar_button_color="#1e293b",
+            scrollbar_button_hover_color=ACCENT_CYAN,
+            scrollbar_fg_color="#070a12"
         )
-        self.chat_container.pack(fill="both", expand=True, padx=20, pady=(10, 80))
+        self.chat_container.pack(fill="both", expand=True, padx=20, pady=(10, 85))
         self.chat_container.bind("<Configure>", self._on_chat_resize)
+
+        # Espaciador inferior dinámico para evitar que la cápsula flotante tape los últimos mensajes
+        self._chat_bottom_spacer = ctk.CTkFrame(self.chat_container, height=85, fg_color="transparent")
+        self._chat_bottom_spacer.pack(fill="x", pady=0)
 
         # 3. CÁPSULA FLOTANTE INFERIOR
         self.frame_floating_input = ctk.CTkFrame(
@@ -784,6 +792,8 @@ class MainWindow(ctk.CTk):
         for child in self.chat_container.winfo_children():
             child.destroy()
         self._message_cards.clear()
+        self._chat_bottom_spacer = ctk.CTkFrame(self.chat_container, height=85, fg_color="transparent")
+        self._chat_bottom_spacer.pack(fill="x", pady=0)
 
         self._render_chats_list()
         self._initial_greeting()
@@ -800,6 +810,8 @@ class MainWindow(ctk.CTk):
         for child in self.chat_container.winfo_children():
             child.destroy()
         self._message_cards.clear()
+        self._chat_bottom_spacer = ctk.CTkFrame(self.chat_container, height=85, fg_color="transparent")
+        self._chat_bottom_spacer.pack(fill="x", pady=0)
 
         curr_sess = next((s for s in self.chat_sessions if s["id"] == session_id), None)
         if curr_sess:
@@ -891,17 +903,62 @@ class MainWindow(ctk.CTk):
             )
             card.pack(fill="x", padx=20, pady=4)
 
-        if card and hasattr(card, "update_wraplength"):
-            self._message_cards.append(card)
-            curr_width = self.chat_container.winfo_width()
-            wrap = max(280, curr_width - 120) if curr_width > 100 else 480
-            card.update_wraplength(wrap)
+        if card:
+            # Mantener espaciador al final para que la cápsula flotante nunca tape el último mensaje
+            if hasattr(self, "_chat_bottom_spacer"):
+                try:
+                    self._chat_bottom_spacer.pack_forget()
+                    self._chat_bottom_spacer.pack(fill="x", pady=0)
+                except Exception:
+                    pass
 
-        self.chat_container.update_idletasks()
+            if hasattr(card, "update_wraplength"):
+                self._message_cards.append(card)
+                curr_width = self.chat_container.winfo_width()
+                wrap = max(280, curr_width - 120) if curr_width > 100 else 480
+                card.update_wraplength(wrap)
+
+            # Habilitar desplazamiento de ratón en toda el área de la tarjeta
+            self._bind_mousewheel_recursive(card)
+
+        # Desplazamiento automático fluido y garantizado hacia el fondo
+        self._scroll_chat_to_bottom()
+
+    def _scroll_chat_to_bottom(self):
+        """Desplaza la vista al fondo de manera confiable en múltiples ciclos de cálculo de Tkinter."""
+        def _do_scroll():
+            try:
+                self.chat_container.update_idletasks()
+                self.chat_container._parent_canvas.yview_moveto(1.0)
+            except Exception:
+                pass
+
+        _do_scroll()
+        self.after(30, _do_scroll)
+        self.after(120, _do_scroll)
+        self.after(260, _do_scroll)
+
+    def _bind_mousewheel_recursive(self, widget):
+        """Propaga el evento de la rueda del ratón hacia el canvas de chat para desplazamiento sin interrupciones."""
+        def _on_wheel(event):
+            try:
+                if sys.platform.startswith("win"):
+                    delta = -int(event.delta / 40)
+                    self.chat_container._parent_canvas.yview_scroll(delta, "units")
+                else:
+                    self.chat_container._parent_canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
+            except Exception:
+                pass
+
         try:
-            self.chat_container._parent_canvas.yview_moveto(1.0)
+            widget.bind("<MouseWheel>", _on_wheel, add=True)
+            widget.bind("<Button-4>", _on_wheel, add=True)
+            widget.bind("<Button-5>", _on_wheel, add=True)
         except Exception:
             pass
+
+        for child in widget.winfo_children():
+            self._bind_mousewheel_recursive(child)
 
     def _on_chat_resize(self, event):
         """Ajusta dinámicamente el ancho de envoltura al redimensionar la ventana."""
