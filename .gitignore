@@ -37,3 +37,8 @@ desktop.ini
 
 # Scratch and debug files
 scratch/
+
+# Build and packaging
+build/
+dist/
+*.spec
