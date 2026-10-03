@@ -20,6 +20,8 @@ import pygame
 from voice.wakeword import WakeWordDetector
 from voice.stt import SpeechToTextListener
 from voice.tts import TextToSpeechEngine
+from voice.ducking import AudioDucker
+
 
 
 class AssistantState(str, Enum):
@@ -207,6 +209,10 @@ class VoiceAssistantManager:
         self.register_spoken_text(text, from_voice=from_voice)
         self.tts.speak(text)
 
+    def speak_async(self, text: str, from_voice: bool = False):
+        """Vocaliza de forma asíncrona delegando en speak."""
+        self.speak(text, from_voice=from_voice)
+
     # ================= 1. EVENTO WAKE WORD (¡VEX!) =================
 
     def _handle_wake_word_detected(self, keyword_heard: str):
@@ -214,22 +220,25 @@ class VoiceAssistantManager:
         self._cancel_follow_up_timer()
         self.is_voice_session = True
 
-        # 1. Notificar efecto de luz y sonido cibernético
+        # 1. Atenuación acústica (Audio Ducking) al 25% durante 4s para aislar la voz de la música
+        AudioDucker.duck(target_scalar=0.25, duration=4.0)
+
+        # 2. Notificar efecto de luz y sonido cibernético
         if self.on_wake_flash:
             try:
                 self.on_wake_flash()
             except Exception:
                 pass
 
-        # 2. Reproducir chime de activación
+        # 3. Reproducir chime de activación
         CyberChimes.play_wake()
 
-        # 3. Transicionar a estado WAKE y de inmediato a LISTENING
+        # 4. Transicionar a estado WAKE y de inmediato a LISTENING
         self.set_state(AssistantState.WAKE)
 
-        # Pausa breve de 250ms para que termine el chime antes de abrir el micrófono
+        # Pausa breve para que termine el chime (180ms) antes de abrir el micrófono
         def start_listening():
-            time.sleep(0.22)
+            time.sleep(0.18)
             self.set_state(AssistantState.LISTENING)
             self.stt.start_listening_async()
 
@@ -249,6 +258,7 @@ class VoiceAssistantManager:
     def _on_stt_result(self, recognized_text: str):
         """Texto reconocido exitosamente tras superar los filtros acústicos."""
         self._cancel_follow_up_timer()
+        AudioDucker.restore()
 
         # Limpiar texto de invocaciones residuales al inicio
         clean = recognized_text.strip()
@@ -277,6 +287,7 @@ class VoiceAssistantManager:
 
     def _on_stt_timeout(self):
         """El usuario no habló dentro de la ventana de escucha de 5-6 segundos."""
+        AudioDucker.restore()
         if self.hands_free_mode:
             # En modo charla continua forzado, reintentar escucha
             self.set_state(AssistantState.LISTENING)
@@ -288,6 +299,7 @@ class VoiceAssistantManager:
 
     def _on_stt_error(self, err_message: str):
         """Ocurrió un error en el reconocimiento de voz."""
+        AudioDucker.restore()
         self.is_voice_session = False
         if self.current_state in [AssistantState.LISTENING, AssistantState.FOLLOW_UP]:
             self._go_to_sleep()
@@ -297,21 +309,28 @@ class VoiceAssistantManager:
     def _on_tts_start(self):
         """VEX comienza a vocalizar la respuesta."""
         self._cancel_follow_up_timer()
+        AudioDucker.restore()
+        self.stt.stop_listening()
+        self.wake_detector.pause()
         self.set_state(AssistantState.SPEAKING)
 
     def _on_tts_end(self):
         """VEX terminó de vocalizar la respuesta."""
-        # Solo abrir ventana de seguimiento si la sesión provino de voz o estamos en modo manos libres
-        if (self.is_voice_session or self.hands_free_mode) and self.current_state == AssistantState.SPEAKING:
-            self._enter_follow_up_window()
-        else:
-            self.is_voice_session = False
-            self._go_to_sleep()
+        # 1 segundo de enfriamiento acústico antes de volver a Standby para evitar auto-eco
+        def finish_speech():
+            time.sleep(1.0)
+            if self.hands_free_mode and self.current_state == AssistantState.SPEAKING:
+                self._enter_follow_up_window()
+            else:
+                self.is_voice_session = False
+                self._go_to_sleep()
+
+        threading.Thread(target=finish_speech, daemon=True).start()
 
     # ================= 4. VENTANA DE SEGUIMIENTO (FOLLOW-UP) Y REPOSO =================
 
     def _enter_follow_up_window(self):
-        """Mantiene el micrófono abierto 4 segundos para conversación fluida sin repetir 'VEX'."""
+        """Mantiene el micrófono abierto temporalmente si el modo manos libres está activo."""
         self.set_state(AssistantState.FOLLOW_UP)
 
         def follow_up_task():
@@ -360,6 +379,7 @@ class VoiceAssistantManager:
         if self.current_state == AssistantState.LISTENING:
             self._go_to_sleep()
         else:
+            AudioDucker.duck(target_scalar=0.25, duration=4.0)
             CyberChimes.play_wake()
             self.set_state(AssistantState.LISTENING)
             self.stt.start_listening_async()
@@ -367,6 +387,7 @@ class VoiceAssistantManager:
     def emergency_stop(self):
         """Detiene toda actividad vocal, interrumpe el habla y duerme al asistente (Esc)."""
         self._cancel_follow_up_timer()
+        AudioDucker.restore()
         self.tts.stop()
         self.stt.stop_listening()
         self._go_to_sleep()
@@ -374,6 +395,8 @@ class VoiceAssistantManager:
     def shutdown(self):
         """Cierre completo y limpio de todos los hilos y mezcladores de audio."""
         self._cancel_follow_up_timer()
+        AudioDucker.restore()
         self.wake_detector.stop()
         self.stt.stop_listening()
         self.tts.shutdown()
+

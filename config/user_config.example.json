@@ -1,7 +1,14 @@
 {
     "gemini_api_key": "",
+    "groq_api_key": "",
+    "elevenlabs_api_key": "",
+    "active_provider": "gemini",
+    "tts_engine": "edge-tts",
+    "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb",
     "user_name": "Oscar",
     "voice_id": "es-MX-JorgeNeural",
     "hands_free_mode": false,
-    "preferred_model": "gemini-2.5-flash"
+    "preferred_model": "gemini-2.5-flash",
+    "preferred_model_gemini": "gemini-2.5-flash",
+    "preferred_model_groq": "llama-3.3-70b-versatile"
 }

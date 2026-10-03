@@ -29,6 +29,16 @@ from tools.media_controller import (
     play_spotify,
     play_youtube
 )
+from tools.memory_tools import (
+    crear_tarea,
+    add_user_task,
+    set_user_routine,
+    remember_fact,
+    list_user_tasks,
+    complete_user_task,
+    delete_user_task
+)
+
 
 
 def safe_print(msg: str):
@@ -154,13 +164,22 @@ class GeminiAgent:
         self.raw_tools = [
             play_music,
             play_spotify,
+            play_youtube,
             search_youtube,
             open_url,
             launch_application,
             control_media,
             system_info,
-            write_note
+            write_note,
+            crear_tarea,
+            add_user_task,
+            set_user_routine,
+            remember_fact,
+            list_user_tasks,
+            complete_user_task,
+            delete_user_task
         ]
+
         self._initialize_client()
 
     def _wrap_tool(self, func: Callable) -> Callable:
@@ -416,7 +435,7 @@ class GeminiAgent:
                         pass
 
                 if not reply:
-                    reply = "Orden táctica ejecutada con éxito."
+                    reply = self.generate_response(message) if hasattr(self, "generate_response") else ""
 
                 # Extraer etiqueta de ánimo si está presente (ej. [MOOD: HAPPY] o [MOOD: SAD])
                 explicit_mood = None
@@ -427,7 +446,7 @@ class GeminiAgent:
                 reply = re.sub(r"\[[A-Z_:][^\]\[]*\]", "", reply, flags=re.IGNORECASE).strip()
                 reply = re.sub(r"\s{2,}", " ", reply).strip()
                 if not reply:
-                    reply = "Orden táctica ejecutada con éxito."
+                    reply = "A la orden, Oscar. Sistemas en línea."
 
                 prev_model = self.active_model
                 self.active_model = model_name

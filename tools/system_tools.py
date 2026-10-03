@@ -32,6 +32,36 @@ def _send_key_event(vk_code: int):
         ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
 
 
+DETACHED_PROCESS = 0x00000008  # Bandera de Windows para desacoplar proceso
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+
+def launch_application_safely(command_or_path: str) -> bool:
+    """
+    Lanza cualquier aplicación o comando externo en un subproceso completamente independiente
+    y desacoplado de Windows (DETACHED_PROCESS), garantizando que el ciclo de vida del programa
+    abierto no interfiera, bloquee ni destruya jamás el proceso o la ventana de VEX.
+    """
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(
+                command_or_path,
+                shell=True,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                close_fds=True
+            )
+        else:
+            subprocess.Popen(
+                command_or_path,
+                shell=True,
+                close_fds=True
+            )
+        return True
+    except Exception as e:
+        print(f"[VEX Safe Launcher] Error seguro al lanzar '{command_or_path}': {e}")
+        return False
+
+
 def search_youtube(query: str) -> str:
     """
     Abre el navegador web y busca directamente un video, canción o contenido en YouTube.
@@ -42,8 +72,14 @@ def search_youtube(query: str) -> str:
     clean_query = query.strip()
     encoded = urllib.parse.quote_plus(clean_query)
     url = f"https://www.youtube.com/results?search_query={encoded}"
-    webbrowser.open(url)
-    return f"Búsqueda en YouTube ejecutada para: '{clean_query}'"
+    try:
+        if sys.platform == "win32":
+            launch_application_safely(f'start "" "{url}"')
+        else:
+            webbrowser.open(url)
+        return f"Búsqueda en YouTube ejecutada para: '{clean_query}'"
+    except Exception as e:
+        return f"Error seguro al buscar en YouTube: {e}"
 
 
 def open_url(url: str) -> str:
@@ -56,15 +92,21 @@ def open_url(url: str) -> str:
     clean_url = url.strip()
     if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
         clean_url = "https://" + clean_url
-    webbrowser.open(clean_url)
-    return f"Navegador abierto en la URL: {clean_url}"
+    try:
+        if sys.platform == "win32":
+            launch_application_safely(f'start "" "{clean_url}"')
+        else:
+            webbrowser.open(clean_url)
+        return f"Navegador abierto en la URL: {clean_url}"
+    except Exception as e:
+        return f"Error seguro al abrir enlace: {e}"
 
 
 def launch_application(app_name: str) -> str:
     """
-    Abre una aplicación instalada en la computadora (Spotify, Discord, Calculadora, Navegador, etc.).
+    Abre una aplicación instalada en la computadora (Spotify, Discord, Calculadora, Word, Navegador, etc.).
     IMPORTANTE: Si el usuario te pide abrir el Bloc de Notas y escribir, anotar o redactar texto,
-    NO uses esta función; usa la herramienta especializada 'write_note'.
+    usa la herramienta especializada 'write_note'.
 
     Args:
         app_name: Nombre de la aplicación a ejecutar.
@@ -76,56 +118,103 @@ def launch_application(app_name: str) -> str:
 
     name_lower = raw_name.lower().strip()
 
-    # Mapeo seguro de aplicaciones comunes en Windows
+    # Mapeo universal y robusto de aplicaciones comunes en Windows
     app_mapping = {
-        "spotify": "spotify:",
-        "discord": "discord:",
+        "spotify": 'start "" "spotify:"',
+        "discord": 'start "" "discord:"',
         "bloc de notas": "notepad.exe",
         "notepad": "notepad.exe",
         "calculadora": "calc.exe",
         "calc": "calc.exe",
         "calculator": "calc.exe",
-        "navegador": "https://www.google.com",
-        "browser": "https://www.google.com",
-        "chrome": "chrome.exe",
-        "edge": "msedge.exe",
+        "word": 'start "" winword',
+        "microsoft word": 'start "" winword',
+        "excel": 'start "" excel',
+        "microsoft excel": 'start "" excel',
+        "powerpoint": 'start "" powerpnt',
+        "navegador": 'start "" "https://www.google.com"',
+        "browser": 'start "" "https://www.google.com"',
+        "chrome": 'start "" chrome',
+        "google chrome": 'start "" chrome',
+        "edge": 'start "" msedge',
+        "microsoft edge": 'start "" msedge',
+        "firefox": 'start "" firefox',
         "explorador": "explorer.exe",
         "archivos": "explorer.exe",
-        "terminal": "powershell.exe",
-        "cmd": "cmd.exe",
-        "powershell": "powershell.exe",
-        "vscode": "code",
-        "visual studio code": "code",
+        "terminal": "start cmd.exe",
+        "cmd": "start cmd.exe",
+        "powershell": "start powershell.exe",
+        "vscode": 'start "" code',
+        "visual studio code": 'start "" code',
+        "code": 'start "" code',
         "administrador de tareas": "taskmgr.exe",
         "task manager": "taskmgr.exe",
-        "configuracion": "ms-settings:",
-        "ajustes": "ms-settings:",
-        "settings": "ms-settings:",
-        "alarma": "ms-clock:",
-        "alarmas": "ms-clock:",
-        "reloj": "ms-clock:",
-        "temporizador": "ms-clock:",
-        "cronometro": "ms-clock:"
+        "configuracion": 'start "" "ms-settings:"',
+        "ajustes": 'start "" "ms-settings:"',
+        "settings": 'start "" "ms-settings:"',
+        "alarma": 'start "" "ms-clock:"',
+        "alarmas": 'start "" "ms-clock:"',
+        "reloj": 'start "" "ms-clock:"',
+        "temporizador": 'start "" "ms-clock:"',
+        "cronometro": 'start "" "ms-clock:"'
     }
 
-    target = app_mapping.get(name_lower, name_lower)
+    cmd = app_mapping.get(name_lower)
+    if not cmd:
+        import shutil
+        is_known_uri = any(raw_name.startswith(p) for p in ["http://", "https://", "ms-", "mailto:", "spotify:"])
+        is_executable = (
+            os.path.exists(raw_name) or
+            shutil.which(raw_name) is not None or
+            shutil.which(raw_name + ".exe") is not None or
+            is_known_uri
+        )
+        if not is_executable:
+            possible_paths = [
+                os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), raw_name),
+                os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), raw_name),
+                os.path.join(os.environ.get("LocalAppData", ""), "Programs", raw_name)
+            ]
+            found = False
+            for p in possible_paths:
+                if os.path.exists(p) or os.path.exists(p + ".exe"):
+                    found = True
+                    raw_name = p
+                    break
+            if not found:
+                try:
+                    from memory.manager import get_memory_manager
+                    active_u = get_memory_manager().active_user
+                    user_name = active_u.get("display_name", "Oscar") if active_u else "Oscar"
+                except Exception:
+                    user_name = "Oscar"
+                return f"No pude encontrar esa aplicación en tu sistema, {user_name}."
+
+        if sys.platform == "win32":
+            cmd = f'start "" "{raw_name}"'
+        else:
+            cmd = raw_name
 
     try:
-        if sys.platform == "win32":
-            # Protocolos o URLs de Windows se abren de forma nativa y segura con os.startfile
-            if target.startswith(("http://", "https://")) or target.endswith(":"):
-                os.startfile(target)
-                return f"Aplicación o protocolo '{app_name}' iniciado correctamente."
-
-            # Ejecutar binario sin shell=True
-            executable = shutil.which(target) or target
-            subprocess.Popen([executable], shell=False)
+        success = launch_application_safely(cmd)
+        if success:
+            return f"Aplicación '{app_name}' iniciada correctamente."
         else:
-            executable = shutil.which(target) or target
-            subprocess.Popen([executable], shell=False)
-        return f"Aplicación '{app_name}' iniciada correctamente."
-    except Exception as e:
-        return f"No se pudo iniciar la aplicación '{app_name}'. Detalle: {e}"
+            try:
+                from memory.manager import get_memory_manager
+                active_u = get_memory_manager().active_user
+                user_name = active_u.get("display_name", "Oscar") if active_u else "Oscar"
+            except Exception:
+                user_name = "Oscar"
+            return f"No pude encontrar esa aplicación en tu sistema, {user_name}."
+    except Exception:
+        try:
+            from memory.manager import get_memory_manager
+            active_u = get_memory_manager().active_user
+            user_name = active_u.get("display_name", "Oscar") if active_u else "Oscar"
+        except Exception:
+            user_name = "Oscar"
+        return f"No pude encontrar esa aplicación en tu sistema, {user_name}."
 
 
 from tools.media_controller import (
@@ -208,9 +297,9 @@ def write_note(content: str, title: str = "Nota_VEX") -> str:
             f.write(clean_content + "\n")
 
         if sys.platform == "win32":
-            subprocess.Popen(["notepad.exe", file_path])
+            launch_application_safely(f'notepad.exe "{file_path}"')
         else:
-            subprocess.Popen(["xdg-open", file_path])
+            launch_application_safely(f'xdg-open "{file_path}"')
 
         return f"Nota '{clean_title}.txt' redactada con éxito y abierta en el Bloc de notas."
     except Exception as e:

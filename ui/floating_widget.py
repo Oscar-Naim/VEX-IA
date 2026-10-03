@@ -156,6 +156,10 @@ class FloatingWidget(ctk.CTkToplevel):
             font=("Segoe UI", 9)
         )
         self.context_menu.add_command(
+            label="  💬  Abrir chat (Restaurar ventana)",
+            command=self.restore_main_window
+        )
+        self.context_menu.add_command(
             label="  ⧉  Expandir a ventana completa",
             command=self.restore_main_window
         )
@@ -204,9 +208,9 @@ class FloatingWidget(ctk.CTkToplevel):
         """Activa o desactiva la articulación fonética de la boca."""
         self.visor.set_speaking(speaking)
 
-    def set_expression(self, expr_name: str, duration: Optional[float] = None):
+    def set_expression(self, expr_name: str, duration: Optional[float] = None, force: bool = False):
         """Proyecta una expresión facial en el visor del widget."""
-        self.visor.set_expression(expr_name, duration)
+        self.visor.set_expression(expr_name, duration, force=force)
 
     def show_icon(self, icon_name: str, duration: float = 3.0):
         """Proyecta un icono contextual (música, notas, reloj, etc.) en el visor."""
@@ -215,3 +219,8 @@ class FloatingWidget(ctk.CTkToplevel):
     def trigger_wake_flash(self, duration: float = 0.65):
         """Dispara el destello cian reactivo al escuchar la palabra clave 'VEX'."""
         self.visor.trigger_wake_flash(duration)
+
+    def set_persistent_mood(self, mood: Optional[str]):
+        """Sincroniza el estado de ánimo persistente en el visor del widget."""
+        if hasattr(self.visor, "set_persistent_mood"):
+            self.visor.set_persistent_mood(mood)

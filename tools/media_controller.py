@@ -1,6 +1,8 @@
 """
 LYAXIS labs™ - Controlador Inteligente Multimedia y Streaming (Spotify & YouTube)
 Búsqueda y reproducción automática de música con deep linking nativo y fallback web.
+Garantiza que la ventana principal de VEX permanezca siempre abierta y activa,
+sin forzar jamás la minimización ni la transición al modo widget.
 """
 import os
 import sys
@@ -59,75 +61,67 @@ def is_spotify_installed() -> bool:
     return any(os.path.exists(p) for p in possible_paths)
 
 
-def _auto_play_spotify(query: str):
-    """
-    Automatización en segundo plano mejorada:
-    Espera que Spotify cargue la búsqueda mediante URI,
-    enfoca la ventana y envía Enter para reproducir el primer resultado.
-    Múltiples intentos con retrasos escalonados para mayor fiabilidad.
-    """
-    # Fase 1: Esperar que Spotify cargue la vista de búsqueda
-    time.sleep(2.2)
-
-    if not (HAVE_PYAUTOGUI or HAVE_WIN32):
-        return
-
-    target_hwnd = None
-
-    # Intentar localizar y enfocar ventana de Spotify (hasta 3 intentos)
-    for attempt in range(3):
+def _press_enter_key():
+    """Simula pulsación de tecla Enter a nivel de sistema operativo y pyautogui."""
+    VK_RETURN = 0x0D
+    if sys.platform == "win32":
         try:
-            if HAVE_WIN32:
-                def enum_handler(hwnd, _):
-                    nonlocal target_hwnd
-                    if win32gui.IsWindowVisible(hwnd):
-                        title = win32gui.GetWindowText(hwnd).lower()
-                        cls_name = win32gui.GetClassName(hwnd).lower()
-                        if "spotify" in title or "spotify" in cls_name or "chrome_widgetwin" in cls_name:
-                            target_hwnd = hwnd
-
-                win32gui.EnumWindows(enum_handler, None)
-
-                if target_hwnd:
-                    try:
-                        win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-                        time.sleep(0.15)
-                        win32gui.SetForegroundWindow(target_hwnd)
-                        time.sleep(0.3)
-                    except Exception:
-                        pass
-                    break
+            ctypes.windll.user32.keybd_event(VK_RETURN, 0, 0, 0)
+            time.sleep(0.05)
+            ctypes.windll.user32.keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, 0)
         except Exception:
             pass
-
-        if not target_hwnd:
-            time.sleep(0.8)  # Esperar más si Spotify aún no apareció
-
-    # Fase 2: Enviar Enter para activar el Top Result de la búsqueda
-    if HAVE_PYAUTOGUI and target_hwnd:
+    if HAVE_PYAUTOGUI:
         try:
-            time.sleep(0.4)
-            pyautogui.press("enter")  # Seleccionar primer resultado
-            time.sleep(0.25)
-            pyautogui.press("enter")  # Confirmar reproducción
-        except Exception as e:
-            print(f"[MediaController] Error en auto-reproducción: {e}")
-    elif HAVE_PYAUTOGUI:
-        # Fallback: aun sin hwnd detectado, intentar con foco global
-        try:
-            time.sleep(0.5)
             pyautogui.press("enter")
         except Exception:
             pass
 
 
+def _auto_play_spotify(query: str):
+    """
+    Automatización táctica de Spotify:
+    1. Espera 1.2 segundos a que cargue la ventana de Spotify.
+    2. Simula la pulsación de la tecla Enter para reproducir de inmediato el primer resultado.
+    Nota: La ventana de VEX permanece intacta en segundo plano o lista para recibir comandos.
+    """
+    time.sleep(1.2)
+    _press_enter_key()
+    time.sleep(0.35)
+    _press_enter_key()
+
+
+DETACHED_PROCESS = 0x00000008  # Desacopla el subproceso de Windows
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+
+def launch_application_safely(command_or_path: str) -> bool:
+    """Lanza cualquier comando o URL sin bloquear ni arriesgar el proceso de VEX."""
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(
+                command_or_path,
+                shell=True,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                close_fds=True
+            )
+        else:
+            subprocess.Popen(
+                command_or_path,
+                shell=True,
+                close_fds=True
+            )
+        return True
+    except Exception as e:
+        print(f"[VEX Media] Error seguro al lanzar '{command_or_path}': {e}")
+        return False
+
+
 def play_spotify(query: str) -> str:
     """
-    Busca y reproduce un artista, canción o álbum en Spotify.
-
-    1. Utiliza el protocolo URI nativo de Windows: spotify:search:"{encoded_query}"
-    2. Si Spotify está instalado, abre la app y activa la reproducción del primer resultado.
-    3. Si no está instalado, abre automáticamente la versión web en open.spotify.com.
+    Busca y reproduce un artista, canción o álbum en Spotify activando auto-play.
+    La ventana principal de VEX PERMANECE ABIERTA y con el campo de texto disponible.
+    NUNCA fuerza el modo widget ni minimiza la ventana del asistente.
 
     Args:
         query: Nombre de la canción, artista o álbum deseado.
@@ -136,35 +130,20 @@ def play_spotify(query: str) -> str:
     if not clean_query:
         return control_media("play_pause")
 
-    encoded = urllib.parse.quote(clean_query)
-    opened_desktop = False
+    try:
+        if sys.platform == "win32":
+            # Ejecutar con lanzador desacoplado no bloqueante
+            launched = launch_application_safely(f'start "" "spotify:search:{clean_query}"')
+            if not launched:
+                encoded = urllib.parse.quote(clean_query)
+                launch_application_safely(f'start "" "https://open.spotify.com/search/{encoded}"')
+        else:
+            webbrowser.open(f"https://open.spotify.com/search/{urllib.parse.quote(clean_query)}")
+    except Exception:
+        webbrowser.open(f"https://open.spotify.com/search/{urllib.parse.quote(clean_query)}")
 
-    if sys.platform == "win32":
-        # Método 1: Protocolo URI nativo spotify:search: (más directo)
-        try:
-            uri = f"spotify:search:{encoded}"
-            os.startfile(uri)
-            opened_desktop = True
-        except Exception:
-            # Método 2: Respaldo con subprocess start
-            try:
-                subprocess.Popen(
-                    ["cmd", "/c", f'start spotify:search:{encoded}'],
-                    shell=False, creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                opened_desktop = True
-            except Exception:
-                opened_desktop = False
-
-    if opened_desktop:
-        # Lanzar automatización de reproducción inmediata en hilo independiente
-        threading.Thread(target=_auto_play_spotify, args=(clean_query,), daemon=True).start()
-        return f"[✔ Spotify: Buscando y reproduciendo '{clean_query}']"
-    else:
-        # Fallback automático a Spotify Web en el navegador
-        web_url = f"https://open.spotify.com/search/{encoded}"
-        webbrowser.open(web_url)
-        return f"[✔ Spotify Web: Abriendo búsqueda para '{clean_query}']"
+    threading.Thread(target=_auto_play_spotify, args=(clean_query,), daemon=True).start()
+    return f"[✔ Spotify: Reproduciendo '{clean_query}']"
 
 
 def play_youtube(query: str) -> str:
@@ -172,6 +151,7 @@ def play_youtube(query: str) -> str:
     Busca y reproduce contenido en YouTube o YouTube Music.
     Intenta resolver el enlace directo del primer video para reproducción inmediata;
     si no es posible, abre la búsqueda con los resultados.
+    La ventana principal de VEX PERMANECE ABIERTA y con el campo de texto disponible.
 
     Args:
         query: Término de búsqueda, artista o título del video.
@@ -187,19 +167,25 @@ def play_youtube(query: str) -> str:
     direct_played = False
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get(search_url, headers=headers, timeout=3.5)
+        resp = requests.get(search_url, headers=headers, timeout=3.0)
         if resp.status_code == 200:
             video_ids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', resp.text)
             if video_ids:
                 first_id = video_ids[0]
                 watch_url = f"https://www.youtube.com/watch?v={first_id}"
-                webbrowser.open(watch_url)
+                if sys.platform == "win32":
+                    launch_application_safely(f'start "" "{watch_url}"')
+                else:
+                    webbrowser.open(watch_url)
                 direct_played = True
     except Exception:
         direct_played = False
 
     if not direct_played:
-        webbrowser.open(search_url)
+        if sys.platform == "win32":
+            launch_application_safely(f'start "" "{search_url}"')
+        else:
+            webbrowser.open(search_url)
 
     return f"[✔ YouTube: Buscando y reproduciendo '{clean_query}']"
 

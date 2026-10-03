@@ -8,8 +8,9 @@
 #   python main.py
 # ==============================================================================
 
-# Núcleo de Inferencia y LLM (Google Gemini SDK Oficial)
+# Núcleo de Inferencia y LLM (Multi-Proveedor: Google Gemini y Groq Cloud)
 google-genai>=0.1.1
+groq>=0.11.0
 
 # Interfaz Gráfica Futurista HUD (CustomTkinter)
 customtkinter>=5.2.0
@@ -21,8 +22,9 @@ vosk>=0.3.45
 SpeechRecognition>=3.10.0
 pyaudio>=0.2.14
 
-# Motor de Voz Neural Ultra-Realista Masculina (Edge-TTS)
+# Motor de Voz Neural Híbrido (Edge-TTS Gratuito y ElevenLabs Ultra-Realista)
 edge-tts>=6.1.0
+elevenlabs>=1.0.0
 
 # Reproducción y Mezclador de Audio Asíncrono de Baja Latencia
 pygame>=2.5.0
@@ -32,6 +34,9 @@ python-dotenv>=1.0.0
 
 # Peticiones HTTP de red y validación
 requests>=2.31.0
+
+# Procesamiento de imágenes para visión multimodal Gemini (opcional pero recomendado)
+Pillow>=10.0.0
 
 # Telemetría de Diagnóstico de Hardware y Control del Sistema
 psutil>=5.9.0

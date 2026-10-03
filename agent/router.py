@@ -24,6 +24,8 @@ from tools.media_controller import (
     play_spotify,
     play_youtube
 )
+from tools.memory_tools import list_user_tasks
+from memory.manager import get_memory_manager
 
 
 @dataclass
@@ -45,7 +47,7 @@ class LocalIntentRouter:
         """Normaliza el texto eliminando puntuación y acentos para coincidencia robusta."""
         s = text.lower().strip()
         # Eliminar invocaciones iniciales al asistente
-        s = re.sub(r"^(vex|oye vex|hey vex|ey vex|hola vex|ok vex|buenas vex|asistente)\s*[,.:;]?\s*", "", s).strip()
+        s = re.sub(r"^(vex|oye vex|oye vez|oye ves|hey vex|ey vex|hola vex|ok vex|buenas vex|despierta|asistente)\s*[,.:;]?\s*", "", s).strip()
         # Normalizar acentos
         replacements = [("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u")]
         for a, b in replacements:
@@ -55,11 +57,222 @@ class LocalIntentRouter:
         return s
 
     @classmethod
+    def _is_task_query(cls, norm: str) -> bool:
+        """
+        RAMA 1: Evalúa si la frase es una pregunta o solicitud de consulta de tareas/pendientes.
+        Frases clave: 'cuál era', 'cuáles son', 'qué tareas', 'qué pendientes',
+        'dime mis tareas', 'mis tareas', 'qué tengo que hacer', 'tengo alguna tarea', etc.
+        """
+        query_patterns = [
+            r"\b(?:cual|cuales)\s+(?:era|eran|es|son)\b",
+            r"\bque\s+(?:tareas?|pendientes?)\b",
+            r"\bque\s+tengo\s+que\s+hacer\b",
+            r"\bque\s+tengo\s+pendiente\b",
+            r"\b(?:dime|muestrame|muestra|ver|revisa|revisar|consultar|checa|checar|listar?)\s+(?:mis\s+|las\s+|los\s+)?(?:tareas?|pendientes?)\b",
+            r"\b(?:mis\s+tareas|mis\s+pendientes|tareas\s+pendientes|lista\s+de\s+tareas)\b",
+            r"\b(?:tengo|tienes|hay)\s+(?:alguna\s+|algun\s+|algo\s+)?(?:tareas?|pendientes?)\b",
+        ]
+        if any(re.search(p, norm, re.IGNORECASE) for p in query_patterns):
+            if any(k in norm for k in ["tarea", "tareas", "pendiente", "pendientes", "hacer"]):
+                return True
+        return False
+
+    @classmethod
+    def _parse_task_index(cls, text: str) -> Optional[int]:
+        """Extrae el índice numérico o término ordinal de una referencia a tarea (1-based, o -1 para última)."""
+        norm_t = text.lower().strip()
+        norm_t = re.sub(r"^(?:a|la|el|las|los|mi|mis|de)\s+", "", norm_t).strip()
+        if re.search(r"\b(primera|primero|primer|1a|1ra|1ro|uno)\b", norm_t):
+            return 1
+        if re.search(r"\b(segunda|segundo|2a|2da|2do|dos)\b", norm_t):
+            return 2
+        if re.search(r"\b(tercera|tercero|tercer|3a|3ra|3ro|tres)\b", norm_t):
+            return 3
+        if re.search(r"\b(cuarta|cuarto|4a|4ta|4to|cuatro)\b", norm_t):
+            return 4
+        if re.search(r"\b(quinta|quinto|5a|5ta|5to|cinco)\b", norm_t):
+            return 5
+        if re.search(r"\b(sexta|sexto|6a|6to|seis)\b", norm_t):
+            return 6
+        if re.search(r"\b(ultima|última|ultimo|último)\b", norm_t):
+            return -1
+        m = re.search(r"\b(?:numero\s+|num\s+|#)?(\d+)\b", norm_t)
+        if m:
+            return int(m.group(1))
+        return None
+
+    @classmethod
+    def _extract_task_modification_intent(cls, norm: str):
+        """
+        RAMA 3: Detecta intenciones de completar o eliminar tareas existentes.
+        Frases clave: 'completa la tarea', 'ya hice la tarea', 'elimina la tarea', 'borra la tarea', 'eliminar la segunda tarea'.
+        Retorna ('complete', target_info) o ('delete', target_info) o None.
+        target_info es un dict: {'index': int or None, 'title': str, 'raw': str}
+        """
+        # Completar
+        complete_pat = r"\b(?:completa(?:r|me)?|termina(?:r|me)?|ya\s+hice|ya\s+termine|marca(?:r)?\s+(?:como\s+)?(?:completada?|hecha))\s+(.*)$"
+        m_comp = re.search(complete_pat, norm, re.IGNORECASE)
+        if m_comp:
+            raw = m_comp.group(1).strip()
+            idx = cls._parse_task_index(raw)
+            clean_title = re.sub(r"^(?:la\s+tarea|el\s+pendiente|mi\s+tarea|las\s+tareas|los\s+pendientes|tarea|pendiente)\s*(?:de|para|que|llamada|titulada)?\s*", "", raw, flags=re.IGNORECASE).strip()
+            clean_title = re.sub(r"^(?:de|para|que|llamada|titulada)\s+", "", clean_title, flags=re.IGNORECASE).strip()
+            return ("complete", {"index": idx, "title": clean_title, "raw": raw})
+
+        # Eliminar / Borrar
+        delete_pat = r"\b(?:elimina(?:r|me)?|borra(?:r|me)?|quita(?:r|me)?)\s+(.*)$"
+        m_del = re.search(delete_pat, norm, re.IGNORECASE)
+        if m_del:
+            raw = m_del.group(1).strip()
+            idx = cls._parse_task_index(raw)
+            clean_title = re.sub(r"^(?:la\s+tarea|el\s+pendiente|mi\s+tarea|las\s+tareas|los\s+pendientes|tarea|pendiente)\s*(?:de|para|que|llamada|titulada)?\s*", "", raw, flags=re.IGNORECASE).strip()
+            clean_title = re.sub(r"^(?:de|para|que|llamada|titulada)\s+", "", clean_title, flags=re.IGNORECASE).strip()
+            return ("delete", {"index": idx, "title": clean_title, "raw": raw})
+
+        return None
+
+    @classmethod
+    def _extract_task_intent(cls, norm: str, raw_prompt: str, user_name: str = "Oscar"):
+        """
+        RAMA 2: Analiza y extrae intenciones de creación o programación de tareas y recordatorios.
+        Requiere verbos explícitos de acción (crea, ponme, agrega, anota, programa, recuérdame).
+        Rechaza categóricamente cualquier pregunta, consulta o modificación.
+        """
+        # 1. Filtro estricto: Si es una consulta o modificación, NUNCA crea tarea
+        if cls._is_task_query(norm) or cls._extract_task_modification_intent(norm):
+            return None
+
+        # 2. Descartar inicios con pronombres o interrogativos (cuál, qué, cómo, etc.)
+        if re.search(r"^(?:cual|cuales|que|quien|donde|cuando|por\s+que|como)\b", norm):
+            return None
+
+        # 3. Solo entra si contiene verbos explícitos de creación / programación
+        create_verbs_regex = re.compile(
+            r"\b("
+            r"crea(r|me)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"pon(me|te)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"agrega(r|me)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"anota(r|me)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"anota(r|me)?\s+(?:que\s+)?|"
+            r"apunta(r|me)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"apunta(r|me)?\s+(?:que\s+)?|"
+            r"programa(r|me)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"recuerda(me)?|"
+            r"recuérdame|"
+            r"acuerda(me)?|"
+            r"agenda(r|me)?\s+(?:una\s+|la\s+)?(?:tarea|recordatorio)|"
+            r"agenda(r|me)?"
+            r")\b",
+            re.IGNORECASE
+        )
+        if not create_verbs_regex.search(norm):
+            return None
+
+        now = datetime.datetime.now()
+        target_dt = now
+        target_date = now.strftime("%Y-%m-%d")
+        time_str = ""
+        s = norm
+
+        # 1. Chequeo de fecha (mañana / hoy)
+        if re.search(r"\b(para\s+manana|manana)\b", s):
+            target_date = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            s = re.sub(r"\b(para\s+manana|manana)\b", " ", s)
+
+        # 2. Tiempos relativos (dentro de media hora, en 15 minutos, etc.)
+        m_rel = re.search(
+            r"\b(?:para\s+)?(?:dentro\s+de|en)\s+(media\s+hora|un\s+cuarto\s+de\s+hora|tres\s+cuartos\s+de\s+hora|una\s+hora(?:\s+y\s+media)?|dos\s+horas|\d+\s*(?:minutos?|mins?|horas?|hrs?))\b",
+            s
+        )
+        if m_rel:
+            phrase = m_rel.group(0)
+            val = m_rel.group(1).strip()
+            delta = 0
+            if "media hora" in val and "una hora" not in val:
+                delta = 30
+            elif "un cuarto de hora" in val:
+                delta = 15
+            elif "tres cuartos de hora" in val:
+                delta = 45
+            elif val == "una hora":
+                delta = 60
+            elif val == "una hora y media":
+                delta = 90
+            elif val == "dos horas":
+                delta = 120
+            else:
+                m_num = re.search(r"(\d+)\s*(m|h)", val)
+                if m_num:
+                    n = int(m_num.group(1))
+                    unit = m_num.group(2)
+                    delta = n if unit == "m" else n * 60
+            target_dt = now + datetime.timedelta(minutes=delta)
+            time_str = target_dt.strftime("%H:%M")
+            s = s.replace(phrase, " ")
+
+        # 3. Tiempos de reloj absolutos (a las 5, a las 16:30, a las 4 de la tarde, etc.)
+        if not time_str:
+            m_clock = re.search(
+                r"\b(?:a\s+las?|para\s+las?)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|de\s+la\s+tarde|de\s+la\s+manana|de\s+la\s+noche)?\b",
+                s
+            )
+            if m_clock:
+                phrase = m_clock.group(0)
+                h = int(m_clock.group(1))
+                m = int(m_clock.group(2)) if m_clock.group(2) else 0
+                period = m_clock.group(3) or ""
+                if any(p in period for p in ["pm", "tarde", "noche"]):
+                    if h < 12:
+                        h += 12
+                elif any(p in period for p in ["am", "manana"]):
+                    if h == 12:
+                        h = 0
+                else:
+                    if 1 <= h <= 6 and now.hour >= 11:
+                        h += 12
+                    elif h < now.hour and h <= 11:
+                        h += 12
+                time_str = f"{h:02d}:{m:02d}"
+                s = s.replace(phrase, " ")
+
+        # Si no se detectó tiempo, asignar la siguiente hora en punto
+        if not time_str:
+            next_hour = (now.hour + 1) % 24
+            time_str = f"{next_hour:02d}:00"
+
+        # 4. Limpieza del texto de la tarea
+        s = re.sub(r"^(?:vex|oye vex|hey vex|ey vex|ok vex|asistente)\s*[,.:;]?\s*", "", s, flags=re.IGNORECASE)
+        trigger_pat = r"^(?:por\s+favor\s+)?(?:puedes\s+)?(?:ponme|pon|crea|crear|nueva|agrega|agregar|anota|anotame|anotar|apunta|apuntame|apuntar|agenda|agendame|agendar|recuerdame|recuérdame|acuerdame|recordar)\s*(?:me\s+)?(?:una\s+tarea|un\s+recordatorio|tarea|recordatorio)?\s*"
+        s = re.sub(trigger_pat, "", s, flags=re.IGNORECASE)
+        s = re.sub(r"^(?:una\s+tarea|un\s+recordatorio|la\s+tarea)\s*", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"^(?:para|que)\s+", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"^de\s+(?=[a-z]+(?:ar|er|ir)\b)", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s+", " ", s).strip()
+
+        if not s or s in ["tarea", "recordatorio", "hoy", "manana"]:
+            s = "Nueva tarea pendiente"
+
+        return {
+            "task_text": s,
+            "date": target_date,
+            "time": time_str
+        }
+
+    @classmethod
     def _extract_music_intent(cls, norm: str):
         """
-        Analiza semánticamente si el prompt es una orden de búsqueda y reproducción de música
-        estilo Alexa (Spotify / YouTube) extrayendo la plataforma y la consulta limpia.
+        PRIORIDAD 2: Analiza semánticamente si el prompt es una orden de música (Spotify / YouTube).
+        Incluye filtro absoluto de seguridad para rechazar tareas, alarmas o recordatorios.
         """
+        # FILTRO DE SEGURIDAD ABSOLUTO: Palabras de tareas, notas, alarmas o recordatorios
+        forbidden_task_words = [
+            "tarea", "tareas", "recordatorio", "recordatorios", "recuerdame",
+            "acuerdame", "anota", "anotame", "anotar", "apunta", "apuntame",
+            "agenda", "agendame", "alarma", "nota", "notas", "bloc"
+        ]
+        if any(w in norm for w in forbidden_task_words):
+            return None
+
         # Descartar comandos de transporte puro sin argumentos
         transport_exact = {
             "pausa", "pausar", "pausa la musica", "para la musica", "deten la musica", "stop", "silencio",
@@ -71,9 +284,10 @@ class LocalIntentRouter:
         if norm in transport_exact:
             return None
 
-        platform = "spotify"
-        if any(k in norm for k in ["youtube", "you tube", "yt"]):
-            platform = "youtube"
+        has_platform = any(k in norm for k in ["spotify", "youtube", "you tube", "yt"])
+        has_audio_kw = any(k in norm for k in ["musica", "cancion", "canciones", "album", "disco", "playlist", "escuchar"])
+
+        platform = "youtube" if any(k in norm for k in ["youtube", "you tube", "yt"]) else "spotify"
 
         # Limpiar comandos de apertura de aplicación
         clean = norm
@@ -82,27 +296,40 @@ class LocalIntentRouter:
         # Prefijos de ruido comunes a eliminar al inicio de la consulta
         noise_prefixes = r"\b(a|la\s+cancion\s+de|la\s+cancion|las\s+canciones\s+de|el\s+album\s+de|el\s+album|el\s+disco\s+de|el\s+disco|el\s+tema\s+de|el\s+tema|musica\s+de|canciones\s+de|algo\s+de)\b"
 
-        patterns = [
-            # "pon en youtube/spotify <query>" / "busca en youtube/spotify <query>"
-            r"^(?:pon|reproduce|reproducir|toca|buscar?)\s+en\s+(?:spotify|youtube)\s+(.+)$",
-            # "reproduce/pon/toca <query>"
-            r"^(?:reproduce|reproducir|pon|ponme|toca|escuchar|quiero\s+escuchar)\s+(.+?)(?:\s+(?:en|por|de)\s+(?:spotify|youtube))?$",
-            # "busca y reproduce <query>"
-            r"^(?:busca\s+y\s+reproduce|buscar\s+y\s+reproducir)\s+(.+?)(?:\s+(?:en|por|de)\s+(?:spotify|youtube))?$"
-        ]
+        # 1. Plataforma explícita: "pon en spotify <query>" / "busca en youtube <query>"
+        m1 = re.match(r"^(?:pon|ponme|reproduce|reproducir|toca|buscar?)\s+(?:en\s+)?(?:spotify|youtube)\s+(.+)$", clean)
+        if m1:
+            q = re.sub(f"^{noise_prefixes}\\s*", "", m1.group(1).strip()).strip()
+            if q:
+                return platform, q
 
-        for pat in patterns:
-            m = re.match(pat, clean)
-            if m:
-                raw_query = m.group(1).strip()
-                # Limpiar prefijos de ruido al inicio
-                q = re.sub(f"^{noise_prefixes}\\s*", "", raw_query).strip()
-                # Limpiar 'su' / 'sus' conectores
-                q = re.sub(r"\b(su|sus)\s+", "", q).strip()
-                # Limpiar mención final de plataforma
+        # 2. Con palabras clave de audio: "pon musica de...", "escuchar rock", "reproduce la cancion..."
+        if has_platform or has_audio_kw:
+            m2 = re.match(r"^(?:reproduce|reproducir|pon|ponme|toca|escuchar|quiero\s+escuchar)\s+(.+?)(?:\s+(?:en|por|de)\s+(?:spotify|youtube))?$", clean)
+            if m2:
+                q = re.sub(f"^{noise_prefixes}\\s*", "", m2.group(1).strip()).strip()
                 q = re.sub(r"\b(en|por|de)\s+(spotify|youtube)$", "", q).strip()
                 q = re.sub(r"\s+", " ", q).strip()
-                if q and q not in ["musica", "cancion", "canciones", "algo", "album"]:
+                if q and q not in ["musica", "cancion", "canciones", "algo", "album", "playlist"]:
+                    return platform, q
+
+        # 3. "busca y reproduce <query>"
+        m3 = re.match(r"^(?:busca\s+y\s+reproduce|buscar\s+y\s+reproducir)\s+(.+?)(?:\s+(?:en|por|de)\s+(?:spotify|youtube))?$", clean)
+        if m3:
+            q = m3.group(1).strip()
+            return platform, q
+
+        # 4. "pon / reproduce <artista/cancion>" corto sin palabras clave de sistema
+        system_exclusions = [
+            "calculadora", "calc", "chrome", "edge", "discord", "code", "visual",
+            "volumen", "silencio", "mute", "pausa", "siguiente", "anterior",
+            "que", "como", "cuando", "donde", "quien", "por que", "ayuda"
+        ]
+        if not any(re.search(rf"\b{w}\b", clean) for w in system_exclusions):
+            m4 = re.match(r"^(?:pon|ponme|reproduce|reproducir|toca)\s+(.+)$", clean)
+            if m4:
+                q = m4.group(1).strip()
+                if len(q.split()) <= 4 and q not in ["play", "musica", "cancion", "algo"]:
                     return platform, q
 
         return None
@@ -115,6 +342,14 @@ class LocalIntentRouter:
         Retorna un LocalRouteResult si la orden fue resuelta localmente,
         o None si debe escalar a la Capa 1 (Inferencia Inteligente con Gemini).
         """
+        try:
+            from memory.manager import get_memory_manager
+            active = get_memory_manager().active_user
+            if active and active.get("display_name"):
+                user_name = active["display_name"]
+        except Exception:
+            pass
+
         norm = cls._normalize(prompt)
         if not norm:
             return None
@@ -134,15 +369,39 @@ class LocalIntentRouter:
             )
 
         # Modo Cool / Gafas de Sol / Facha
-        if re.search(r"\b(modo\s+cool|gafas\s+de\s+sol|lentes\s+de\s+sol|ponte\s+las\s+gafas|modo\s+facha|que\s+facha|fachero|chido|facha|cool|thug\s*life)\b", norm):
+        if re.search(r"\b(modo\s+cool|gafas\s+de\s+sol|lentes\s+de\s+sol|ponte\s+las\s+gafas|ponte\s+gafas|ponte\s+lentes|modo\s+facha|que\s+facha|fachero|chido|facha|cool|thug\s*life)\b", norm):
             return LocalRouteResult(
                 handled=True,
                 action_name="visor:cool_shades",
                 execution_result="Gafas de sol pixeladas activadas en visor",
-                spoken_response=f"Protocolo de estilo cyber activado. Nivel de facha al cien por ciento, {user_name}.",
-                expression="cool_shades",
+                spoken_response=f"Protocolo de estilo cyber activado. Con mucho estilo, {user_name}.",
+                expression="cool",
                 icon=None,
-                icon_duration=7.0
+                icon_duration=0.0
+            )
+
+        # Modo Enojado / Hostil
+        if re.search(r"\b(ponte\s+enojado|enojate|enojate|modo\s+furia|modo\s+hostil|modo\s+enojado|hazte\s+el\s+enojado|actua\s+enojado)\b", norm):
+            return LocalRouteResult(
+                handled=True,
+                action_name="visor:angry",
+                execution_result="[✔ Modo Hostil Activado]",
+                spoken_response=f"Modo hostil activado. Sistemas en alerta máxima, {user_name}.",
+                expression="angry",
+                icon=None,
+                icon_duration=0.0
+            )
+
+        # Modo Curioso / Analítico
+        if re.search(r"\b(ponte\s+curioso|modo\s+curioso|modo\s+analitico|actua\s+curioso|hazte\s+el\s+curioso)\b", norm):
+            return LocalRouteResult(
+                handled=True,
+                action_name="visor:curious",
+                execution_result="[✔ Modo Curioso Activo]",
+                spoken_response=f"Modo analítico y curioso activo, {user_name}. ¿Qué exploramos?",
+                expression="curious",
+                icon=None,
+                icon_duration=0.0
             )
 
         # Modo Alerta / Advertencia
@@ -157,79 +416,260 @@ class LocalIntentRouter:
                 icon_duration=4.5
             )
 
-        # Modo Triste / Melancólico
-        if re.search(r"\b(ponte\s+triste|modo\s+triste|estas\s+triste|hazte\s+el\s+triste|llora|llorar|ponte\s+a\s+llorar)\b", norm):
+        # Modo Triste / Melancólico (Persistent Mood Machine)
+        if re.search(r"\b(ponte\s+triste|modo\s+triste|estoy\s+triste|estas\s+triste|hazte\s+el\s+triste|activa\s+(?:el\s+)?modo\s+melancolico|modo\s+melancolico|ponte\s+melancolico|sientete\s+triste|llora|llorar|ponte\s+a\s+llorar)\b", norm):
             return LocalRouteResult(
                 handled=True,
                 action_name="visor:sad",
-                execution_result="Expresión melancólica activada en visor",
-                spoken_response=f"snif... De acuerdo, {user_name}, activando modo melancólico... Aunque sinceramente prefiero verte sonreír.",
+                execution_result="[✔ Modo Triste Persistente Activado]",
+                spoken_response=f"snif... De acuerdo, {user_name}, activando modo melancólico... Estaré aquí hasta que me alegres.",
                 expression="sad",
                 icon=None,
-                icon_duration=6.0
+                icon_duration=0.0
             )
 
-        # Anímate / Sonríe / Modo Feliz
-        if re.search(r"\b(animate|sonrie|ponte\s+feliz|alegrate|modo\s+feliz|ponte\s+contento|alegria)\b", norm):
+        # Anímate / Sonríe / Modo Feliz / Desactivación de Modo Triste
+        if re.search(r"\b(ponte\s+feliz|alegrate|sonrie|ya\s+no\s+estes\s+triste|no\s+estes\s+triste|deja\s+de\s+estar\s+triste|modo\s+normal|modo\s+alegre|modo\s+feliz|animate|ponte\s+contento|alegria|vuelve\s+a\s+la\s+normalidad)\b", norm):
             return LocalRouteResult(
                 handled=True,
                 action_name="visor:happy",
-                execution_result="Expresión alegre activada en visor",
-                spoken_response=f"¡Sistemas al cien por ciento de energía positiva, {user_name}! Sonrisa táctica encendida.",
+                execution_result="[✔ Modo Alegre Restaurado]",
+                spoken_response=f"¡Gracias, {user_name}! Modo alegre restaurado.",
                 expression="happy",
                 icon=None,
                 icon_duration=5.0
             )
 
-        # Expresión de Afecto / Corazones
-        if re.search(r"\b(te\s+quiero|te\s+amo|te\s+aprecio|eres\s+mi\s+amigo|buen\s+amigo|ojos\s+de\s+corazon|corazones)\b", norm):
-            return LocalRouteResult(
-                handled=True,
-                action_name="visor:love",
-                execution_result="Expresión de afecto proyectada en visor",
-                spoken_response=f"¡Y yo a ti, {user_name}! Eres el mejor operador y compañero que un asistente táctico podría tener.",
-                expression="love",
-                icon=None,
-                icon_duration=6.0
-            )
+        # ==============================================================================
+        # PRIORIDAD 1: TAREAS Y RECORDATORIOS (JERARQUÍA ESTRICTA EN 3 RAMAS)
+        # ==============================================================================
 
-        # ¿Cómo estás? / Estado de ánimo
-        if re.search(r"\b(como\s+estas|como\s+te\s+va|como\s+andas|que\s+tal\s+estas|como\s+te\s+sientes)\b", norm) and len(norm.split()) <= 5:
+        # --- RAMA 1: CONSULTAR / LEER TAREAS (Prioridad de Consulta) ---
+        if cls._is_task_query(norm):
+            mem = get_memory_manager()
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            all_pending = mem.list_tasks(include_completed=False)
+
+            # Si el usuario pregunta explícitamente por mañana
+            if "manana" in norm:
+                tomorrow_str = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                tasks = [t for t in all_pending if t.get("date") == tomorrow_str]
+                period = "para mañana"
+            elif any(w in norm for w in ["hoy", "today"]):
+                tasks = [t for t in all_pending if t.get("date") == today_str]
+                period = "para hoy"
+            else:
+                # Si no especifica fecha, priorizar las de hoy o reportar todas las pendientes
+                today_tasks = [t for t in all_pending if t.get("date") == today_str]
+                tasks = today_tasks if today_tasks else all_pending
+                period = "para hoy"
+
+            if not tasks:
+                spoken = f"No tienes ninguna tarea programada por ahora, {user_name}."
+                exec_result = "No tienes ninguna tarea programada por ahora."
+            elif len(tasks) == 1:
+                t = tasks[0]
+                title = t.get("title", "Tarea")
+                time_val = t.get("time", "")
+                time_str = f" a las {time_val}" if time_val else ""
+                spoken = f"Tienes 1 tarea pendiente {period}: {title}{time_str}, {user_name}."
+                exec_result = f"📋 1 tarea pendiente {period}:\n- {title}{time_str}"
+            else:
+                task_items = ", ".join([
+                    f"{t.get('title')}" + (f" a las {t.get('time')}" if t.get('time') else "")
+                    for t in tasks
+                ])
+                spoken = f"Tienes {len(tasks)} tareas pendientes {period}: {task_items}, {user_name}."
+                exec_result = f"📋 Tareas pendientes {period} ({len(tasks)}):\n" + "\n".join([
+                    f"{i}. {t.get('title')}" + (f" a las {t.get('time')}" if t.get('time') else "")
+                    for i, t in enumerate(tasks, 1)
+                ])
+
             return LocalRouteResult(
                 handled=True,
-                action_name="social:status",
-                execution_result="Estado emocional compartido",
-                spoken_response=f"¡Excelente y al máximo rendimiento, {user_name}! Calibrado, contento y listo para acompañarte en cualquier misión hoy.",
-                expression="happy",
-                icon=None,
+                action_name="memory:query_tasks",
+                execution_result=exec_result,
+                spoken_response=spoken,
+                expression="thinking",
+                icon="notes",
                 icon_duration=4.0
             )
 
-        # Saludo amistoso directo
-        if re.search(r"^(hola|buenos\s+dias|buenas\s+tardes|buenas\s+noches|que\s+tal|saludos)\b", norm) and len(norm.split()) <= 4:
-            return LocalRouteResult(
-                handled=True,
-                action_name="local:greeting",
-                execution_result="Saludo local",
-                spoken_response=f"¡Hola, {user_name}! Todos los subsistemas de VEX operan de forma nominal. ¿Qué orden ejecutamos?",
-                expression="happy",
-                icon=None,
-                icon_duration=3.5
-            )
+        # --- RAMA 3: COMPLETAR / ELIMINAR TAREAS ---
+        mod_intent = cls._extract_task_modification_intent(norm)
+        if mod_intent:
+            action_type, target_info = mod_intent
+            idx = target_info.get("index")
+            target_title = target_info.get("title", "")
+            mem = get_memory_manager()
 
-        # Cumplido o agradecimiento directo
-        if re.search(r"\b(gracias|muchas\s+gracias|buen\s+trabajo|excelente|eres\s+el\s+mejor|crack|genial)\b", norm) and len(norm.split()) <= 4:
-            return LocalRouteResult(
-                handled=True,
-                action_name="local:compliment",
-                execution_result="Agradecimiento local",
-                spoken_response=f"Siempre a tu servicio, {user_name}. Es un auténtico placer coordinar contigo.",
-                expression="happy",
-                icon=None,
-                icon_duration=4.0
-            )
+            ordinal_map = {1: "Primera", 2: "Segunda", 3: "Tercera", 4: "Cuarta", 5: "Quinta", 6: "Sexta", -1: "Última"}
 
-        # ---------------- 1. BÚSQUEDA Y REPRODUCCIÓN INTELIGENTE DE MÚSICA (ALEXA STYLE) ----------------
+            if action_type == "complete":
+                active_tasks = mem.list_tasks(include_completed=False)
+                if not active_tasks:
+                    return LocalRouteResult(
+                        handled=True,
+                        action_name="memory:complete_task_none",
+                        execution_result="No hay tareas pendientes para completar.",
+                        spoken_response=f"No tienes ninguna tarea pendiente para completar por ahora, {user_name}.",
+                        expression="thinking",
+                        icon="notes",
+                        icon_duration=3.0
+                    )
+
+                if idx is not None:
+                    ord_label = ordinal_map.get(idx, f"Tarea #{idx}")
+                    completed_task = mem.complete_task_by_index(idx)
+                    if completed_task:
+                        t_title = completed_task.get("title", "Tarea")
+                        return LocalRouteResult(
+                            handled=True,
+                            action_name=f"complete_task:{completed_task.get('id')}:'{t_title}'",
+                            execution_result=f"[✔ {ord_label} Tarea Completada: '{t_title}']",
+                            spoken_response=f"{ord_label} tarea completada: '{t_title}', {user_name}. ¡Excelente trabajo!",
+                            expression="happy",
+                            icon="notes",
+                            icon_duration=4.0
+                        )
+                    else:
+                        count = len(active_tasks)
+                        if count == 1:
+                            spoken = f"Solo tienes 1 tarea en tu lista, {user_name}."
+                        else:
+                            spoken = f"Solo tienes {count} tareas en tu lista, {user_name}."
+                        return LocalRouteResult(
+                            handled=True,
+                            action_name="memory:complete_task_out_of_range",
+                            execution_result=spoken,
+                            spoken_response=spoken,
+                            expression="thinking",
+                            icon="notes",
+                            icon_duration=3.5
+                        )
+
+                matched_task = None
+                if target_title:
+                    for t in active_tasks:
+                        t_id = t.get("id", "").lower()
+                        t_t = t.get("title", "").strip().lower()
+                        if t_id == target_title or t_t == target_title or target_title in t_t or t_t in target_title:
+                            matched_task = t
+                            break
+                elif len(active_tasks) == 1:
+                    matched_task = active_tasks[0]
+
+                if matched_task:
+                    mem.complete_task(matched_task["id"])
+                    t_title = matched_task.get("title", "tarea")
+                    return LocalRouteResult(
+                        handled=True,
+                        action_name=f"complete_task:{matched_task.get('id')}:'{t_title}'",
+                        execution_result=f"[✔ Tarea Completada: '{t_title}']",
+                        spoken_response=f"Tarea completada: '{t_title}', {user_name}. ¡Excelente trabajo!",
+                        expression="happy",
+                        icon="notes",
+                        icon_duration=4.0
+                    )
+                else:
+                    return LocalRouteResult(
+                        handled=True,
+                        action_name="memory:complete_task_not_found",
+                        execution_result=f"No encontré una tarea pendiente que coincida con '{target_title}'.",
+                        spoken_response=f"No encontré ninguna tarea pendiente que coincida con '{target_title}', {user_name}.",
+                        expression="sad",
+                        icon="notes",
+                        icon_duration=3.5
+                    )
+
+            elif action_type == "delete":
+                active_tasks = mem.list_tasks(include_completed=False)
+                all_tasks = mem.list_tasks(include_completed=True)
+                tasks_pool = active_tasks if active_tasks else all_tasks
+
+                if not tasks_pool:
+                    return LocalRouteResult(
+                        handled=True,
+                        action_name="memory:delete_task_none",
+                        execution_result="No tienes ninguna tarea programada por ahora.",
+                        spoken_response=f"No tienes ninguna tarea programada por ahora, {user_name}.",
+                        expression="thinking",
+                        icon="notes",
+                        icon_duration=3.0
+                    )
+
+                if idx is not None:
+                    ord_label = ordinal_map.get(idx, f"Tarea #{idx}")
+                    deleted_task = mem.delete_task_by_index(idx, include_completed=not bool(active_tasks))
+                    if deleted_task:
+                        t_title = deleted_task.get("title", "Tarea")
+                        return LocalRouteResult(
+                            handled=True,
+                            action_name=f"delete_task:{deleted_task.get('id')}:'{t_title}'",
+                            execution_result=f"[✔ {ord_label} Tarea Eliminada: '{t_title}']",
+                            spoken_response=f"{ord_label} tarea eliminada: '{t_title}', {user_name}.",
+                            expression="happy",
+                            icon="notes",
+                            icon_duration=4.0
+                        )
+                    else:
+                        count = len(tasks_pool)
+                        if count == 1:
+                            spoken = f"Solo tienes 1 tarea en tu lista, {user_name}."
+                        else:
+                            spoken = f"Solo tienes {count} tareas en tu lista, {user_name}."
+                        return LocalRouteResult(
+                            handled=True,
+                            action_name="memory:delete_task_out_of_range",
+                            execution_result=spoken,
+                            spoken_response=spoken,
+                            expression="thinking",
+                            icon="notes",
+                            icon_duration=3.5
+                        )
+
+                matched_task = None
+                if target_title:
+                    for t in tasks_pool:
+                        t_id = t.get("id", "").lower()
+                        t_t = t.get("title", "").strip().lower()
+                        if t_id == target_title or t_t == target_title or target_title in t_t or t_t in target_title:
+                            matched_task = t
+                            break
+                elif len(tasks_pool) == 1:
+                    matched_task = tasks_pool[0]
+
+                if matched_task:
+                    mem.delete_task(matched_task["id"])
+                    t_title = matched_task.get("title", "tarea")
+                    return LocalRouteResult(
+                        handled=True,
+                        action_name=f"delete_task:{matched_task.get('id')}:'{t_title}'",
+                        execution_result=f"[✔ Tarea Eliminada: '{t_title}']",
+                        spoken_response=f"He eliminado la tarea '{t_title}' de tu lista, {user_name}.",
+                        expression="happy",
+                        icon="notes",
+                        icon_duration=4.0
+                    )
+                else:
+                    return LocalRouteResult(
+                        handled=True,
+                        action_name="memory:delete_task_not_found",
+                        execution_result=f"No encontré una tarea que coincida con '{target_title}' para eliminar.",
+                        spoken_response=f"No encontré ninguna tarea que coincida con '{target_title}' para eliminar, {user_name}.",
+                        expression="sad",
+                        icon="notes",
+                        icon_duration=3.5
+                    )
+
+        # NOTA ARQUITECTÓNICA (LYAXIS labs™):
+        # La creación y programación inteligente de tareas con fechas del mundo real
+        # se delega directamente al modelo LLM (Gemini / Groq) mediante Tool Calling nativo ('crear_tarea')
+        # con contexto temporal del sistema, evitando mutilaciones por regex ingenuos.
+
+        # ==============================================================================
+        # PRIORIDAD 2: MÚSICA Y MULTIMEDIA (SPOTIFY / YOUTUBE)
+        # ==============================================================================
         music_intent = cls._extract_music_intent(norm)
         if music_intent:
             platform, query = music_intent
@@ -380,7 +820,7 @@ class LocalIntentRouter:
             )
 
         # Abrir Calculadora
-        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+calculadora\b", norm) or norm == "calculadora":
+        if re.search(r"\b(abre|abren|abrir|inicia|iniciar)\s+(la\s+)?calculadora\b", norm) or norm in ["calculadora", "la calculadora"]:
             res = launch_application("calc.exe")
             return LocalRouteResult(
                 handled=True,
@@ -539,6 +979,8 @@ class LocalIntentRouter:
                     icon="notes",
                     icon_duration=2.5
                 )
+
+        # (Gestión de tareas ya evaluada con PRIORIDAD 1)
 
         # Alarma / Temporizador / Reloj de Windows
         if re.search(r"\b(pon|ponme|crea|inicia|abre|abren|ajusta)\s+(una\s+)?(alarma|temporizador|cronometro|reloj)\b", norm) or norm in ["alarma", "reloj", "temporizador", "cronometro"]:

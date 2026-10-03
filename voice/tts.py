@@ -1,7 +1,9 @@
 """
-LYAXIS labs™ - Motor de Voz Neural VEX con Edge-TTS y Pygame
-Generación de voz masculina ultra-realista (es-MX-JorgeNeural) en segundo plano
-con sincronización milimétrica para el visor digital del robot (Robot Visor).
+LYAXIS labs™ - Motor de Voz Neural Híbrido VEX (Edge-TTS & ElevenLabs)
+Generación de voz en segundo plano con dos niveles:
+- Nivel 1: ElevenLabs (Voz Hiper-realista cinematográfica con API Key, modelo eleven_multilingual_v2).
+- Nivel 2: edge-tts (Motor gratuito ilimitado por defecto con voz es-MX-JorgeNeural a +15% de velocidad).
+Conmutación automática y transparente ante agotamiento de cuota o errores 401/429.
 """
 import os
 import sys
@@ -11,19 +13,42 @@ import threading
 import asyncio
 import tempfile
 import re
+from typing import Optional
 
 # Suprimir mensaje de bienvenida de pygame en consola
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 import pygame
 import edge_tts
 
+try:
+    from elevenlabs.client import ElevenLabs
+    HAVE_ELEVENLABS = True
+except ImportError:
+    HAVE_ELEVENLABS = False
+
 import config
+
+
+def safe_print(msg: str):
+    """Imprime mensajes de forma segura evitando excepciones de codificación en consolas de Windows."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode("ascii", errors="replace").decode("ascii"))
+
+
+# Voces masculinas tácticas recomendadas para ElevenLabs
+ELEVENLABS_VOICES = {
+    "George": "JBFqnCBsd6RMkjVDRZzb",   # Voz profunda, sobria y táctica
+    "Adam": "pNInz6obpgDQGcFmaJgB",     # Voz neutra y natural
+}
+DEFAULT_ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 
 
 class TextToSpeechEngine:
     def __init__(self, on_start=None, on_end=None, on_speaking_state=None):
         """
-        Inicializa el motor de voz neural para VEX.
+        Inicializa el motor de voz neural híbrido para VEX.
 
         Args:
             on_start: Callback invocado cuando la voz comienza a sonar.
@@ -41,7 +66,7 @@ class TextToSpeechEngine:
         # Inicializar el mezclador de audio de pygame
         self._init_mixer()
 
-        # Iniciar hilo en segundo plano para procesar la cola de voz sin trabar la UI
+        # Iniciar hilo en segundo plano para procesar la cola de voz sin bloquear la UI
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True, name="VEX-TTS-Worker")
         self.worker_thread.start()
 
@@ -59,11 +84,83 @@ class TextToSpeechEngine:
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned
 
-    async def _generate_audio_file(self, text: str, output_path: str):
-        """Genera el archivo MP3 mediante edge-tts de forma asíncrona."""
+    def _generate_elevenlabs(self, text: str, output_path: str) -> bool:
+        """
+        Intenta generar el archivo de audio usando ElevenLabs API (Nivel 1).
+        Retorna True si tuvo éxito, o False si falló (activando fallback transparente a edge-tts).
+        """
+        if not HAVE_ELEVENLABS:
+            return False
+
+        api_key = config.get_elevenlabs_api_key()
+        if not api_key:
+            return False
+
+        try:
+            # Obtener ID de voz (resolver alias como 'George' o 'Adam')
+            raw_voice = config.get_elevenlabs_voice_id()
+            voice_id = ELEVENLABS_VOICES.get(raw_voice, raw_voice) or DEFAULT_ELEVENLABS_VOICE_ID
+
+            client = ElevenLabs(api_key=api_key)
+            audio_stream = client.text_to_speech.convert(
+                voice_id=voice_id,
+                text=text,
+                model_id="eleven_multilingual_v2",
+                output_format="mp3_44100_128"
+            )
+
+            with open(output_path, "wb") as f:
+                for chunk in audio_stream:
+                    if chunk:
+                        f.write(chunk)
+
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return True
+            return False
+
+        except Exception as e:
+            err_str = str(e)
+            if any(k in err_str.lower() for k in ["401", "429", "quota", "credits", "unauthorized"]):
+                safe_print(f"[VEX TTS] [ElevenLabs] Cuota mensual agotada o error de autenticación ({err_str}).")
+                safe_print(f"[VEX TTS] [Auto-Failover] Conmutando de forma automática y transparente a Edge-TTS...")
+            else:
+                safe_print(f"[VEX TTS] [ElevenLabs] Error en síntesis: {err_str}. Conmutando a Edge-TTS...")
+            return False
+
+    async def _generate_edge_tts(self, text: str, output_path: str):
+        """
+        Genera el archivo MP3 mediante edge-tts de forma asíncrona (Nivel 2 - Gratuito).
+        Velocidad adaptativa configurada según el perfil activo del usuario (por defecto +15%).
+        """
         voice = getattr(config, "get_voice_id", lambda: self.voice)()
-        communicate = edge_tts.Communicate(text, voice=voice, rate="+0%", pitch="+0Hz")
+        rate = "+15%"
+        try:
+            from memory.manager import get_memory_manager
+            active = get_memory_manager().active_user
+            if active and active.get("voice_speed"):
+                rate = active["voice_speed"]
+        except Exception:
+            pass
+        communicate = edge_tts.Communicate(text, voice=voice, rate=rate, pitch="+0Hz")
         await communicate.save(output_path)
+
+    async def _generate_audio_file(self, text: str, output_path: str):
+        """
+        Orquestador de síntesis de audio de dos niveles con conmutación por cuota.
+        1. Si el motor configurado es 'elevenlabs' y hay API Key, intenta ElevenLabs.
+        2. Si falla o el motor es 'edge-tts', utiliza edge-tts de forma transparente.
+        """
+        engine = config.get_tts_engine()
+        has_eleven_key = bool(config.get_elevenlabs_api_key())
+
+        if engine == "elevenlabs" and has_eleven_key:
+            # Ejecutar llamada síncrona a ElevenLabs en hilo de trabajo
+            success = self._generate_elevenlabs(text, output_path)
+            if success:
+                return
+
+        # Fallback incondicional a edge-tts
+        await self._generate_edge_tts(text, output_path)
 
     def _notify_speaking(self, speaking: bool):
         """Notifica los callbacks de cambio de estado de habla de forma segura."""
@@ -111,7 +208,7 @@ class TextToSpeechEngine:
                     fd, temp_path = tempfile.mkstemp(prefix="vex_voice_", suffix=".mp3")
                     os.close(fd)
 
-                    # 1. Generar audio con Edge-TTS usando el event loop persistente
+                    # 1. Generar audio (ElevenLabs o Edge-TTS con failover)
                     loop.run_until_complete(self._generate_audio_file(text, temp_path))
 
                     if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
@@ -162,6 +259,10 @@ class TextToSpeechEngine:
         """Encola un texto para ser vocalizado por la voz masculina de VEX."""
         if text and text.strip():
             self.queue.put(text.strip())
+
+    def speak_async(self, text: str):
+        """Vocaliza de forma asíncrona a través de la cola de audio sin bloquear el hilo llamador."""
+        self.speak(text)
 
     def stop(self):
         """Detiene la reproducción activa inmediatamente y limpia la cola."""

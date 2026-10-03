@@ -1,11 +1,13 @@
 """
 LYAXIS labs™ - Motor de Reconocimiento de Voz (STT) para VEX
 Captura adaptativa de audio con SpeechRecognition, ajuste automático al ruido ambiental,
-y soporte para comandos breves y conversación natural.
+prevención de ejecuciones concurrentes con threading.Lock, reseteo estricto de buffers
+y filtro anti-duplicación para erradicar repeticiones de frases.
 """
 import time
 import threading
 import speech_recognition as sr
+from voice.ducking import AudioDucker
 
 
 class SpeechToTextListener:
@@ -29,51 +31,70 @@ class SpeechToTextListener:
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.dynamic_energy_adjustment_damping = 0.15
         self.recognizer.dynamic_energy_ratio = 1.5
-        self.recognizer.energy_threshold = 250  # Umbral inicial sensible
+        self.recognizer.energy_threshold = 100  # Umbral inicial sensible y balanceado
 
-        # Detección de fin de habla por silencio natural
-        self.recognizer.pause_threshold = 0.8
-        self.recognizer.non_speaking_duration = 0.4
+        # Calibración anti-cortes: pausas naturales de respiración o reflexión sin cortar a media frase
+        self.recognizer.pause_threshold = 1.8         # Esperar 1.8 segundos de silencio real antes de cerrar la frase
+        self.recognizer.non_speaking_duration = 0.8  # Margen de silencio
+        self.recognizer.phrase_time_limit = 20       # Permitir frases de hasta 20 segundos de duración
 
+        # Candado y flags para garantizar exclusión mutua estricta
+        self._lock = threading.Lock()
         self._is_listening = False
         self._current_thread = None
         self._stop_requested = False
 
+        # Filtro de deduplicación de buffer
+        self._last_delivered_text = ""
+        self._last_delivered_time = 0.0
+
     @property
     def is_listening(self) -> bool:
-        return self._is_listening
+        with self._lock:
+            return self._is_listening
 
     def start_listening_async(self):
-        """Inicia la captura de audio en un hilo independiente."""
-        if self._is_listening:
-            return
+        """Inicia la captura de audio en un hilo independiente garantizando exclusión mutua."""
+        with self._lock:
+            if self._is_listening:
+                print("[VEX STT] Escucha ya en progreso. Rechazando hilo concurrente.")
+                return
 
-        self._stop_requested = False
-        self._is_listening = True
-        self._current_thread = threading.Thread(target=self._capture_audio, daemon=True, name="VEX-STT-Worker")
-        self._current_thread.start()
+            self._stop_requested = False
+            self._is_listening = True
+            self._current_thread = threading.Thread(
+                target=self._capture_audio,
+                daemon=True,
+                name="VEX-STT-Worker"
+            )
+            self._current_thread.start()
 
     def stop_listening(self):
         """Solicita la detención inmediata de la escucha activa."""
-        self._stop_requested = True
-        self._is_listening = False
+        with self._lock:
+            self._stop_requested = True
+            self._is_listening = False
 
     def _capture_audio(self):
-        """Captura audio del micrófono y realiza el reconocimiento."""
+        """Captura audio del micrófono y realiza el reconocimiento con reseteo de buffer."""
         if self.on_listening_start and not self._stop_requested:
             try:
                 self.on_listening_start()
             except Exception as e:
                 print(f"[VEX STT] Error en callback on_listening_start: {e}")
 
+        transcript = ""
         try:
             with sr.Microphone() as source:
                 if self._stop_requested:
                     return
 
-                # Calibración rápida de ruido de fondo (0.3s)
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.3)
-                print(f"[VEX STT] [MIC] Microfono activo (umbral de energia: {self.recognizer.energy_threshold:.1f}). Esperando orden...")
+                # Calibración de ruido de fondo adaptativo
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.20)
+                self.recognizer.energy_threshold = max(70.0, min(self.recognizer.energy_threshold, 350.0))
+                self.recognizer.pause_threshold = 1.8
+                self.recognizer.non_speaking_duration = 0.8
+                print(f"[VEX STT] [MIC] Micrófono activo (umbral: {self.recognizer.energy_threshold:.1f}, pausa: 1.8s). Esperando orden...")
 
                 if self._stop_requested:
                     return
@@ -85,7 +106,7 @@ class SpeechToTextListener:
                         pass
 
                 # Captura la frase del usuario
-                audio = self.recognizer.listen(source, timeout=6.0, phrase_time_limit=10.0)
+                audio = self.recognizer.listen(source, timeout=8.0, phrase_time_limit=20.0)
 
             if self._stop_requested:
                 return
@@ -102,21 +123,35 @@ class SpeechToTextListener:
                 except Exception:
                     raw_text = ""
 
-            text = raw_text.strip()
+            transcript = raw_text.strip()
             if self._stop_requested:
+                transcript = ""
                 return
 
-            if not text:
-                print("[VEX STT] No se detecto ninguna palabra clara.")
+            if not transcript:
+                print("[VEX STT] No se detectó ninguna palabra clara.")
                 if self.on_timeout and not self._stop_requested:
                     self.on_timeout()
                 return
 
-            print(f"[VEX STT] [OK] Orden vocalizada reconocida: '{text}'")
+            # Filtro anti-duplicación temporal: ignora si es idéntica en menos de 2.0s
+            now = time.time()
+            if transcript == self._last_delivered_text and (now - self._last_delivered_time) < 2.0:
+                print(f"[VEX STT] Filtro activo: descartando frase duplicada en < 2.0s: '{transcript}'")
+                transcript = ""
+                return
 
-            # Entregar resultado al orquestador
+            self._last_delivered_text = transcript
+            self._last_delivered_time = now
+
+            print(f"[VEX STT] [OK] Orden vocalizada reconocida: '{transcript}'")
+
+            # Entregar resultado al orquestador y vaciar inmediatamente variable de buffer
+            delivered_text = transcript
+            transcript = ""
+
             if self.on_result and not self._stop_requested:
-                self.on_result(text)
+                self.on_result(delivered_text)
 
         except sr.WaitTimeoutError:
             print("[VEX STT] Tiempo de espera agotado (silencio en la habitación).")
@@ -141,4 +176,7 @@ class SpeechToTextListener:
             if not self._stop_requested and self.on_error:
                 self.on_error(f"Error en micrófono: {e}")
         finally:
-            self._is_listening = False
+            transcript = ""
+            AudioDucker.restore()
+            with self._lock:
+                self._is_listening = False

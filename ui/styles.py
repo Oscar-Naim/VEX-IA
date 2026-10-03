@@ -49,6 +49,65 @@ TEXT_GREEN = "#10b981"
 TEXT_AMBER = "#fbbf24"
 TEXT_WHITE = "#ffffff"
 
+# ==================== SISTEMA DE TEMAS CYBER-PREMIUM ====================
+THEMES = {
+    "electric_cyan": {
+        "id": "electric_cyan",
+        "name": "✦ Electric Cyan (LYAXIS)",
+        "accent": "#00d9ff",
+        "accent_glow": "#38bdf8",
+        "accent_dim": "#0369a1",
+        "accent_secondary": "#2563ff",
+        "bg_header": "#070a12",
+        "glow_rgb": [0.0, 217.0, 255.0],
+        "ACCENT_CYAN": "#00d9ff",
+        "ACCENT_CYAN_GLOW": "#38bdf8",
+        "ACCENT_CYAN_DIM": "#0369a1"
+    },
+    "cyber_synth": {
+        "id": "cyber_synth",
+        "name": "🟣 Cyber Synth",
+        "accent": "#a855f7",
+        "accent_glow": "#ec4899",
+        "accent_dim": "#7e22ce",
+        "accent_secondary": "#c084fc",
+        "bg_header": "#0d071a",
+        "glow_rgb": [168.0, 85.0, 247.0],
+        "ACCENT_CYAN": "#a855f7",
+        "ACCENT_CYAN_GLOW": "#ec4899",
+        "ACCENT_CYAN_DIM": "#7e22ce"
+    },
+    "matrix_green": {
+        "id": "matrix_green",
+        "name": "🟢 Matrix Green",
+        "accent": "#10b981",
+        "accent_glow": "#34d399",
+        "accent_dim": "#047857",
+        "accent_secondary": "#059669",
+        "bg_header": "#05130a",
+        "glow_rgb": [16.0, 185.0, 129.0],
+        "ACCENT_CYAN": "#10b981",
+        "ACCENT_CYAN_GLOW": "#34d399",
+        "ACCENT_CYAN_DIM": "#047857"
+    }
+}
+
+CURRENT_THEME = "electric_cyan"
+
+def get_current_theme():
+    return THEMES.get(CURRENT_THEME, THEMES["electric_cyan"])
+
+def set_active_theme(theme_id: str):
+    global CURRENT_THEME, ACCENT_CYAN, ACCENT_CYAN_GLOW, BORDER_CYAN
+    if theme_id in THEMES:
+        CURRENT_THEME = theme_id
+        t = THEMES[theme_id]
+        ACCENT_CYAN = t["accent"]
+        ACCENT_CYAN_GLOW = t["accent_glow"]
+        BORDER_CYAN = t["accent"]
+        return t
+    return THEMES["electric_cyan"]
+
 
 # ==================== HELPERS DE TIPOGRAFÍA JERARQUIZADA ====================
 
